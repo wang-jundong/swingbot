@@ -1,0 +1,20 @@
+"""Birdeye Data API endpoints and token-scan filters."""
+
+BIRDEYE_TOKEN_LIST_URL = "https://public-api.birdeye.so/defi/v3/token/list"
+BIRDEYE_PRICE_STATS_URL = "https://public-api.birdeye.so/defi/v3/price/stats/single"
+
+LIQUIDITY_USD_MIN = 10_000
+LIQUIDITY_USD_MAX = 50_000
+PAIR_AGE_DAYS_MIN = 1
+PAIR_AGE_DAYS_MAX = 7
+TXNS_H24_MIN = 1_000
+
+PRICE_RANGE_MAX_PCT = {
+    "24h": 50,
+    "8h": 30,
+}
+PRICE_CHANGE_DROP_PCT = -10
+
+PAGE_LIMIT = 100
+MAX_PAGES = 10
+REQUEST_PAUSE_SEC = 0.35

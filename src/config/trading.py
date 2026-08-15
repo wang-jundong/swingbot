@@ -1,0 +1,11 @@
+"""Trade amounts and swing-buy/sell rules."""
+
+BUY_AMOUNT_OPTIONS = [0.01, 0.05, 0.7, 1.0, 1.5, 2, 3, 5]
+SELL_AMOUNT_LABELS = ["max", "1/2", "1/3", "1/4"]
+
+SWING_INTERVAL_SEC = 30 * 60
+SWING_BUY_AMOUNT = 0.05
+SWING_SELL_AMOUNT = "max"
+MAX_BUYS_PER_TOKEN = 2
+SECOND_BUY_PRICE_RATIO = 0.70
+SELL_PNL_RATIO = 1

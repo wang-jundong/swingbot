@@ -1,0 +1,19 @@
+
+numpy==2.4.1
+pandas==2.3.3
+requests==2.32.5
+
+# Telegram bot library
+python-telegram-bot==22.5
+
+# DEX (Solana / Jupiter)
+solana>=0.40.0
+solders>=0.23.0,<0.28
+
+cryptography>=42.0.0
+
+# Code obfuscation / protection
+pyarmor
+
+# Code compilation to C for performance and protection
+nuitka

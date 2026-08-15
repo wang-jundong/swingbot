@@ -5,7 +5,7 @@ BIRDEYE_PRICE_STATS_URL = "https://public-api.birdeye.so/defi/v3/price/stats/sin
 
 LIQUIDITY_USD_MIN = 10_000
 LIQUIDITY_USD_MAX = 50_000
-PAIR_AGE_DAYS_MIN = 1
+PAIR_AGE_DAYS_MIN = 2
 PAIR_AGE_DAYS_MAX = 7
 TXNS_H24_MIN = 1_000
 

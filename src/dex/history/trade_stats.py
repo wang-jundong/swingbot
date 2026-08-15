@@ -1,4 +1,4 @@
-"""Cumulative trade statistics, grouped by pending buy count."""
+"""Cumulative trade statistics for target and hold-period exits."""
 
 import json
 from pathlib import Path
@@ -10,116 +10,118 @@ from src.utils.number_util import format_decimal
 
 logger = get_dex_logger()
 
+REASON_TARGET = "target"
+REASON_HOLD = "hold"
 
-def _new_bucket() -> dict[str, float | int]:
+
+def _new_stats() -> dict[str, float | int]:
     return {
-        "pnl_positive_count": 0,
-        "pnl_negative_count": 0,
-        "pnl_positive_sum": 0.0,
-        "pnl_negative_sum": 0.0,
+        "target_buy_count": 0,
+        "target_buy_pnl": 0.0,
+        "hold_pnl_positive_count": 0,
+        "hold_pnl_positive_sum": 0.0,
+        "hold_pnl_negative_count": 0,
+        "hold_pnl_negative_sum": 0.0,
         "pnl": 0.0,
     }
 
 
-def _parse_bucket(bucket: dict) -> dict[str, float | int]:
-    return {
-        "pnl_positive_count": int(bucket.get("pnl_positive_count", 0)),
-        "pnl_negative_count": int(bucket.get("pnl_negative_count", 0)),
-        "pnl_positive_sum": float(bucket.get("pnl_positive_sum", 0)),
-        "pnl_negative_sum": float(bucket.get("pnl_negative_sum", 0)),
-        "pnl": float(bucket.get("pnl", 0)),
-    }
-
-
-def _unwrap_legacy(raw: dict) -> dict:
-    """Accept current {buy_count: bucket} or legacy {chain: {buy_count: bucket}}."""
-    sample = next(iter(raw.values()), None)
-    if isinstance(sample, dict) and "pnl" in sample:
-        return raw
-    unwrapped: dict = {}
-    for by_buy_count in raw.values():
-        if not isinstance(by_buy_count, dict):
-            continue
-        for buy_count, bucket in by_buy_count.items():
-            if isinstance(bucket, dict) and "pnl" in bucket:
-                unwrapped[str(buy_count)] = bucket
-    return unwrapped
+def _parse_stats(raw: dict) -> dict[str, float | int]:
+    stats = _new_stats()
+    stats["target_buy_count"] = int(raw.get("target_buy_count", 0))
+    stats["target_buy_pnl"] = float(raw.get("target_buy_pnl", 0))
+    stats["hold_pnl_positive_count"] = int(raw.get("hold_pnl_positive_count", 0))
+    stats["hold_pnl_positive_sum"] = float(raw.get("hold_pnl_positive_sum", 0))
+    stats["hold_pnl_negative_count"] = int(raw.get("hold_pnl_negative_count", 0))
+    stats["hold_pnl_negative_sum"] = float(raw.get("hold_pnl_negative_sum", 0))
+    stats["pnl"] = float(raw.get("pnl", 0))
+    return stats
 
 
 def load_trade_stats(
     filepath: Optional[Path | str] = None,
-) -> dict[str, dict[str, float | int]]:
-    """Load stats: buy_count -> counters and sums."""
+) -> dict[str, float | int]:
+    """Load flat target/hold trade stats."""
     path = Path(filepath or TRADE_STATS_PATH)
     if not path.exists():
-        return {}
+        return _new_stats()
     try:
         raw = json.loads(path.read_text())
     except Exception:
-        return {}
+        return _new_stats()
     if not isinstance(raw, dict):
-        return {}
-
-    stats: dict[str, dict[str, float | int]] = {}
-    for buy_count, bucket in _unwrap_legacy(raw).items():
-        if isinstance(bucket, dict):
-            stats[str(buy_count)] = _parse_bucket(bucket)
-    return stats
+        return _new_stats()
+    if "target_buy_count" not in raw and "pnl" not in raw:
+        return _new_stats()
+    # Ignore legacy buy_count-bucket format.
+    if any(key.isdigit() for key in raw):
+        return _new_stats()
+    return _parse_stats(raw)
 
 
 def save_trade_stats(
-    data: dict[str, dict[str, float | int]],
+    data: dict[str, float | int],
     filepath: Optional[Path | str] = None,
 ) -> None:
     """Save stats JSON."""
     path = Path(filepath or TRADE_STATS_PATH)
     path.parent.mkdir(parents=True, exist_ok=True)
     output = {
-        buy_count: {
-            "pnl_positive_count": str(int(bucket["pnl_positive_count"])),
-            "pnl_negative_count": str(int(bucket["pnl_negative_count"])),
-            "pnl_positive_sum": format_decimal(float(bucket["pnl_positive_sum"])),
-            "pnl_negative_sum": format_decimal(float(bucket["pnl_negative_sum"])),
-            "pnl": format_decimal(float(bucket["pnl"])),
-        }
-        for buy_count, bucket in sorted(data.items(), key=lambda item: int(item[0]))
+        "target_buy_count": str(int(data["target_buy_count"])),
+        "target_buy_pnl": format_decimal(float(data["target_buy_pnl"])),
+        "hold_pnl_positive_count": str(int(data["hold_pnl_positive_count"])),
+        "hold_pnl_positive_sum": format_decimal(float(data["hold_pnl_positive_sum"])),
+        "hold_pnl_negative_count": str(int(data["hold_pnl_negative_count"])),
+        "hold_pnl_negative_sum": format_decimal(float(data["hold_pnl_negative_sum"])),
+        "pnl": format_decimal(float(data["pnl"])),
     }
     path.write_text(json.dumps(output, indent=2, ensure_ascii=False))
 
 
 def record_trade_stat(
     pnl: float,
-    buy_count: int,
+    reason: str,
     filepath: Optional[Path | str] = None,
 ) -> dict[str, float | int]:
-    """Add one max sell to the stats for this buy count."""
+    """Add one max sell to target or hold stats."""
     path = Path(filepath or TRADE_STATS_PATH)
     stats = load_trade_stats(path)
-    bucket = stats.setdefault(str(buy_count), _new_bucket())
-
     pnl = float(pnl)
-    if pnl > 0:
-        bucket["pnl_positive_count"] += 1
-        bucket["pnl_positive_sum"] += pnl
-    elif pnl < 0:
-        bucket["pnl_negative_count"] += 1
-        bucket["pnl_negative_sum"] += pnl
-    bucket["pnl"] += pnl
+    reason = str(reason or "").strip().lower()
 
+    if reason == REASON_TARGET:
+        stats["target_buy_count"] += 1
+        stats["target_buy_pnl"] += pnl
+    elif reason == REASON_HOLD:
+        if pnl > 0:
+            stats["hold_pnl_positive_count"] += 1
+            stats["hold_pnl_positive_sum"] += pnl
+        elif pnl < 0:
+            stats["hold_pnl_negative_count"] += 1
+            stats["hold_pnl_negative_sum"] += pnl
+    else:
+        logger.info("skip trade stats: unknown reason=%s", reason)
+        return stats
+
+    stats["pnl"] += pnl
     save_trade_stats(stats, path)
     logger.info(
-        "Trade stats buy_count=%s: pnl=%s total=%s (+/%s -/%s)",
-        buy_count,
+        "trade stats %s pnl=%s total=%s target=%s/%s hold+=%s/%s hold-=%s/%s",
+        reason,
         format_decimal(pnl),
-        format_decimal(float(bucket["pnl"])),
-        bucket["pnl_positive_count"],
-        bucket["pnl_negative_count"],
+        format_decimal(float(stats["pnl"])),
+        stats["target_buy_count"],
+        format_decimal(float(stats["target_buy_pnl"])),
+        stats["hold_pnl_positive_count"],
+        format_decimal(float(stats["hold_pnl_positive_sum"])),
+        stats["hold_pnl_negative_count"],
+        format_decimal(float(stats["hold_pnl_negative_sum"])),
     )
-    return bucket
+    return stats
 
 
 def get_trade_stats(
     filepath: Optional[Path | str] = None,
-) -> dict[str, dict[str, float | int]]:
+) -> dict[str, float | int]:
     """Return all stats."""
     return load_trade_stats(filepath)

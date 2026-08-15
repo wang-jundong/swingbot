@@ -15,6 +15,16 @@ def unix_to_str(unix_ts: int) -> str:
     return pd.Timestamp(unix_ts, unit="s").strftime(DISPLAY_FMT)
 
 
+def str_to_unix(value: str | None) -> int | None:
+    """Parse a CSV/display timestamp to Unix seconds."""
+    if not value:
+        return None
+    try:
+        return int(pd.to_datetime(value, format=DISPLAY_FMT).timestamp())
+    except (TypeError, ValueError):
+        return None
+
+
 def local_hour() -> int:
     """Current hour (0-23) in LOCAL_TIMEZONE."""
     return pd.Timestamp.now(tz=LOCAL_TIMEZONE).hour

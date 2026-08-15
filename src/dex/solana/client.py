@@ -70,6 +70,7 @@ class DexClient:
         amount_in_human_or_label: Union[float, str],
         *,
         recipient: Optional[str] = None,
+        reason: Optional[str] = None,
     ) -> Tuple[Optional[str], bool, float, Optional[float], Optional[float]]:
         """Sell for SOL and return tx result, PnL, and SOL balances."""
         recv_addr = recipient or str(self.keypair.pubkey())
@@ -100,6 +101,7 @@ class DexClient:
                 tx_hash,
                 price=price,
                 amount_native_human=amount_sol,
+                reason=reason,
             )
         return tx_hash, success, pnl, balance_before, balance_after
 

@@ -78,11 +78,12 @@ def format_sell_result(
     pnl: float = 0.0,
     balance_before: Optional[float] = None,
     balance_after: Optional[float] = None,
+    reason: str = "pnl target",
 ) -> str:
     """Sell result message (HTML)."""
     suffix = "✅" if success else "❌"
     lines = [
-        f"🔴 <b>SELL</b> <b>{symbol}</b> — {amount}",
+        f"🔴 <b>SELL</b> <b>{symbol}</b> — {amount} ({reason})",
         f"<a href='{TX_EXPLORER.format(tx_hash)}'>{suffix} Open Transaction</a>",
     ]
     if success:
@@ -98,10 +99,12 @@ def format_sell_result(
     return "\n".join(lines)
 
 
-def format_sell_alert(symbol: str, balance: float, pnl: float) -> str:
-    """Sell-target alert when auto-sell is off (HTML)."""
+def format_sell_alert(
+    symbol: str, balance: float, pnl: float, reason: str = "pnl target",
+) -> str:
+    """Sell-target or hold-period alert when auto-sell is off (HTML)."""
     return (
-        f"🔴 SELL {symbol} — target hit\n"
+        f"🔴 SELL {format_token_link(symbol)} — {reason}\n"
         f"Balance: {format_decimal(balance)}\n"
         f"PnL: {format_decimal(pnl)} {NATIVE_CURRENCY}"
     )

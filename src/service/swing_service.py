@@ -4,6 +4,7 @@ import time
 
 from src.config.solana import SOL_ADDRESS
 from src.config.trading import (
+    HOLD_DAYS,
     MAX_BUYS_PER_TOKEN,
     SECOND_BUY_PRICE_RATIO,
     SELL_PNL_RATIO,
@@ -22,6 +23,7 @@ from src.storage.settings import is_swing_auto_sell_enabled, is_swing_enabled
 from src.telegram.messages import send_buy, send_sell, send_sell_alert
 from src.utils.log_util import get_dex_logger
 from src.utils.number_util import format_decimal, to_float
+from src.utils.time_util import str_to_unix, unix_now
 
 logger = get_dex_logger()
 
@@ -35,9 +37,9 @@ def run_swing_service() -> None:
                     client = DexClient()
                 run_cycle(client)
             else:
-                logger.info("Swing bot stopped; skip cycle")
+                logger.info("stopped")
         except Exception:
-            logger.exception("Swing cycle failed")
+            logger.exception("cycle failed")
             client = None
         time.sleep(SWING_INTERVAL_SEC)
 
@@ -46,12 +48,12 @@ def run_cycle(client: DexClient) -> None:
     run_auto_sell(client)
 
     tokens = scan_tokens()
-    logger.info("Swing scan matched %d token(s)", len(tokens))
+    logger.info("scan %d", len(tokens))
     if not tokens:
         return
 
     coins, added = upsert_scanned_tokens(tokens)
-    logger.info("Swing saved %d new token(s), %d already stored", added, len(coins) - added)
+    logger.info("saved %d new, %d existing", added, len(coins) - added)
 
     for coin in coins:
         maybe_buy(client, coin)
@@ -59,7 +61,7 @@ def run_cycle(client: DexClient) -> None:
 
 def run_auto_sell(client: DexClient) -> None:
     pending = get_pending_transactions()
-    logger.info("Swing sell check %d position(s)", len(pending))
+    logger.info("sell check %d", len(pending))
     for symbol, info in pending.items():
         maybe_sell(client, symbol, info.get("net_cost") or 0.0)
 
@@ -72,41 +74,35 @@ def maybe_buy(client: DexClient, coin: dict) -> None:
 
     buys = get_pending_buy_transactions_by_symbol(symbol)
     if len(buys) >= MAX_BUYS_PER_TOKEN:
-        logger.info("Skip %s: already %d buy(s)", symbol, len(buys))
+        logger.info("skip %s: max buys", symbol)
         return
 
     if len(buys) == 1:
         first_price = _first_buy_price(buys)
         if first_price is None or first_price <= 0:
-            logger.info("Skip %s: missing first buy price", symbol)
+            logger.info("skip %s: no first price", symbol)
             return
         current = client.get_price_native(symbol)
         if current is None:
-            logger.info("Skip %s: no current price", symbol)
+            logger.info("skip %s: no price", symbol)
             return
         threshold = first_price * SECOND_BUY_PRICE_RATIO
         if current > threshold:
-            logger.info(
-                "Skip %s: price %s > %.0f%% of first buy %s",
-                symbol,
-                format_decimal(current),
-                SECOND_BUY_PRICE_RATIO * 100,
-                format_decimal(first_price),
-            )
+            logger.info("skip %s: price above add", symbol)
             return
 
     balance = client.get_native_balance()
     if balance is None or balance < SWING_BUY_AMOUNT:
-        logger.warning("Skip %s: insufficient SOL (%s)", symbol, balance)
+        logger.warning("skip %s: low SOL", symbol)
         return
 
     tx_hash, success, balance_before, balance_after = client.buy(symbol, SWING_BUY_AMOUNT)
     if success and tx_hash:
-        logger.info("Bought %s amount=%s tx=%s", symbol, SWING_BUY_AMOUNT, tx_hash)
+        logger.info("buy %s %s %s", symbol, SWING_BUY_AMOUNT, tx_hash)
         send_buy(symbol, SWING_BUY_AMOUNT, tx_hash, success, balance_before, balance_after)
         return
 
-    logger.warning("Buy failed for %s", symbol)
+    logger.warning("buy failed %s", symbol)
 
 
 def maybe_sell(client: DexClient, symbol: str, net_cost: float = 0.0) -> None:
@@ -119,44 +115,53 @@ def maybe_sell(client: DexClient, symbol: str, net_cost: float = 0.0) -> None:
 
     current = client.get_price_native(symbol)
     if current is None:
-        logger.info("Skip sell %s: no current price", symbol)
+        logger.info("skip sell %s: no price", symbol)
         return
 
     balance = client.get_balance(symbol)
     if balance is None or balance <= 0:
-        logger.info("Skip sell %s: no token balance", symbol)
+        logger.info("skip sell %s: no balance", symbol)
         return
 
     if net_cost <= 0:
-        logger.info("Skip sell %s: missing net cost", symbol)
+        logger.info("skip sell %s: no cost", symbol)
         return
 
     value = current * balance
     pnl = value - net_cost
     threshold = SWING_BUY_AMOUNT * SELL_PNL_RATIO
-    if pnl < threshold:
-        logger.info(
-            "Skip sell %s: pnl %s < %.0f%% of buy amount %s",
-            symbol,
-            format_decimal(pnl),
-            SELL_PNL_RATIO * 100,
-            format_decimal(SWING_BUY_AMOUNT),
-        )
+    hold_expired = _hold_expired(buys)
+    if not hold_expired and pnl < threshold:
+        logger.info("skip sell %s: pnl %s", symbol, format_decimal(pnl))
         return
 
+    reason = "hold" if hold_expired else "target"
     if is_swing_auto_sell_enabled():
-        tx_hash, success, pnl, balance_before, balance_after = client.sell(symbol, SWING_SELL_AMOUNT)
+        tx_hash, success, pnl, balance_before, balance_after = client.sell(
+            symbol, SWING_SELL_AMOUNT, reason=reason,
+        )
         if success and tx_hash:
-            logger.info("Sold %s amount=%s tx=%s pnl=%s", symbol, SWING_SELL_AMOUNT, tx_hash, format_decimal(pnl))
-            send_sell(symbol, SWING_SELL_AMOUNT, tx_hash, success, pnl, balance_before, balance_after)
+            logger.info("sell %s %s pnl=%s %s", symbol, reason, format_decimal(pnl), tx_hash)
+            send_sell(
+                symbol, SWING_SELL_AMOUNT, tx_hash, success, pnl,
+                balance_before, balance_after, reason,
+            )
             return
-        logger.warning("Sell failed for %s", symbol)
+        logger.warning("sell failed %s", symbol)
         return
 
-    logger.info("Sell target hit for %s; auto-sell off, alerting", symbol)
-    send_sell_alert(symbol, balance, pnl)
+    logger.info("alert sell %s %s", symbol, reason)
+    send_sell_alert(symbol, balance, pnl, reason)
 
 
 def _first_buy_price(buys: list[dict]) -> float | None:
     first = min(buys, key=lambda row: str(row.get("timestamp") or ""))
     return to_float(first.get("price"))
+
+
+def _hold_expired(buys: list[dict]) -> bool:
+    first = min(buys, key=lambda row: str(row.get("timestamp") or ""))
+    started = str_to_unix(first.get("timestamp"))
+    if started is None:
+        return False
+    return unix_now() - started >= HOLD_DAYS * 86400

@@ -37,16 +37,18 @@ def record_sell(
     tx_hash: str,
     price: float = 0.0,
     amount_native_human: float = 0.0,
+    reason: str | None = None,
 ) -> float:
     """Persist sell transaction when tx succeeded. Returns pnl."""
     amount_native = amount_native_human
     is_max = str(amount_in_human_or_label).strip().lower() == "max"
     if is_max:
-        pnl, _, _, buy_count = close_symbol_and_calculate_pnl(symbol, amount_native)
-        try:
-            record_trade_stat(pnl, buy_count)
-        except Exception as e:
-            logger.warning("Failed to record trade stats: %s", e)
+        pnl, _, _, _buy_count = close_symbol_and_calculate_pnl(symbol, amount_native)
+        if reason:
+            try:
+                record_trade_stat(pnl, reason)
+            except Exception as e:
+                logger.warning("Failed to record trade stats: %s", e)
         if pnl != 0:
             try:
                 record_daily_pnl(pnl)

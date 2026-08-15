@@ -22,6 +22,7 @@ class DexClient(Protocol):
         amount_in_human_or_label: Union[float, str],
         *,
         recipient: Optional[str] = None,
+        reason: Optional[str] = None,
     ) -> Tuple[Optional[str], bool, float, Optional[float], Optional[float]]: ...
 
     def get_native_balance(self, address: Optional[str] = None) -> Optional[float]: ...

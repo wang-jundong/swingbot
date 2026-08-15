@@ -39,6 +39,7 @@ def send_sell(
     pnl: float = 0.0,
     balance_before: float | None = None,
     balance_after: float | None = None,
+    reason: str = "pnl target",
 ) -> bool:
     """Send a sell result notification (HTML)."""
     return send_message(
@@ -50,14 +51,17 @@ def send_sell(
             pnl,
             balance_before,
             balance_after,
+            reason,
         ),
         parse_mode="HTML",
     )
 
 
-def send_sell_alert(symbol: str, balance: float, pnl: float) -> bool:
-    """Send a sell-target alert when auto-sell is off (HTML)."""
+def send_sell_alert(
+    symbol: str, balance: float, pnl: float, reason: str = "pnl target",
+) -> bool:
+    """Send a sell-target or hold-period alert when auto-sell is off (HTML)."""
     return send_message(
-        format_sell_alert(symbol, balance, pnl),
+        format_sell_alert(symbol, balance, pnl, reason),
         parse_mode="HTML",
     )

@@ -10,7 +10,7 @@ from src.config.bindings.paths import TRANSACTION_HISTORY_PATHS
 from src.config.trading import HOLD_DAYS
 from src.storage.settings import get_key_id
 from src.utils.number_util import format_decimal
-from src.utils.time_util import unix_now, unix_to_str
+from src.utils.time_util import str_to_unix, unix_now, unix_to_str
 from src.utils.log_util import get_dex_logger
 
 logger = get_dex_logger()

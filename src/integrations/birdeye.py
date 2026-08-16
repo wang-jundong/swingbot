@@ -1,10 +1,13 @@
 """Birdeye token screener (Token List V3)."""
 
+import json
 import time
+from pathlib import Path
 
 import requests
 
 from src.config.bindings.binding import BINDINGS
+from src.config.bindings.paths import BIRDEYE_PATH
 from src.config.birdeye import (
     BIRDEYE_PRICE_STATS_URL,
     BIRDEYE_TOKEN_LIST_URL,
@@ -24,9 +27,22 @@ SECONDS_PER_DAY = 86400
 REQUEST_TIMEOUT_SEC = 30
 
 
+def api_key() -> str:
+    path = Path(BIRDEYE_PATH)
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        data = {}
+    if isinstance(data, dict):
+        key = str(data.get("api_key") or "").strip()
+        if key:
+            return key
+    return BINDINGS["BIRDEYE_API_KEY"].strip()
+
+
 def headers() -> dict:
     return {
-        "X-API-KEY": BINDINGS["BIRDEYE_API_KEY"].strip(),
+        "X-API-KEY": api_key(),
         "x-chain": "solana",
         "accept": "application/json",
     }

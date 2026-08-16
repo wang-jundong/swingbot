@@ -13,7 +13,6 @@ from src.telegram.ui.keyboards import MAIN_KEYBOARD
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await asyncio.to_thread(set_mode)
     await update.message.reply_text("Choose an action:", reply_markup=MAIN_KEYBOARD)
 
 

@@ -18,7 +18,7 @@ from src.dex.history.transaction import (
 )
 from src.dex.solana.client import DexClient
 from src.integrations.birdeye import scan_tokens
-from src.storage.coins import upsert_scanned_tokens
+from src.storage.coins import append_buy_metrics, upsert_scanned_tokens
 from src.storage.settings import is_swing_auto_sell_enabled, is_swing_enabled
 from src.telegram.messages import send_buy, send_sell, send_sell_alert
 from src.utils.log_util import get_dex_logger
@@ -100,6 +100,14 @@ def maybe_buy(client: DexClient, coin: dict) -> None:
     if success and tx_hash:
         logger.info("buy %s %s %s", symbol, SWING_BUY_AMOUNT, tx_hash)
         send_buy(symbol, SWING_BUY_AMOUNT, tx_hash, success, balance_before, balance_after)
+        try:
+            append_buy_metrics(
+                address,
+                coin.get("liquidity_usd"),
+                coin.get("pair_age_days"),
+            )
+        except Exception:
+            logger.exception("failed to save buy metrics %s", symbol)
         return
 
     logger.warning("buy failed %s", symbol)

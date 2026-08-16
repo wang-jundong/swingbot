@@ -106,8 +106,41 @@ def upsert_scanned_tokens(
                 by_address[address] = coin
                 added += 1
 
-            scanned.append(coin)
+            scanned.append({
+                **coin,
+                "liquidity_usd": token.get("liquidity_usd"),
+                "pair_age_days": token.get("pair_age_days"),
+            })
 
         if added:
             _save_unlocked(path, coins)
         return scanned, added
+
+
+def append_buy_metrics(
+    address: str,
+    liquidity: float | None,
+    pair_age: float | None,
+    filepath: Optional[str] = None,
+) -> None:
+    """Append liquidity and pair age from a buy onto the stored coin."""
+    path = Path(filepath or COINS_PATH)
+    with _coins_lock(path):
+        coins = _load_unlocked(path)
+        for coin in coins:
+            if coin.get("address") != address:
+                continue
+            coin["liquidity"] = _as_list(coin.get("liquidity"))
+            coin["pair_age"] = _as_list(coin.get("pair_age"))
+            coin["liquidity"].append(liquidity)
+            coin["pair_age"].append(pair_age)
+            _save_unlocked(path, coins)
+            return
+
+
+def _as_list(value) -> list:
+    if isinstance(value, list):
+        return list(value)
+    if value is None:
+        return []
+    return [value]

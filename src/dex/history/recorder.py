@@ -3,7 +3,7 @@
 from typing import Union
 
 from src.dex.history.daily_pnl import record_daily_pnl
-from src.dex.history.trade_stats import record_trade_stat
+from src.dex.history.trade_stats import record_trade_stat, resolve_sell_reason
 from src.dex.history.transaction import save_transaction, close_symbol_and_calculate_pnl
 from src.utils.log_util import get_dex_logger
 
@@ -43,12 +43,12 @@ def record_sell(
     amount_native = amount_native_human
     is_max = str(amount_in_human_or_label).strip().lower() == "max"
     if is_max:
+        reason = resolve_sell_reason(symbol, reason)
         pnl, _, _, _buy_count = close_symbol_and_calculate_pnl(symbol, amount_native)
-        if reason:
-            try:
-                record_trade_stat(pnl, reason)
-            except Exception as e:
-                logger.warning("Failed to record trade stats: %s", e)
+        try:
+            record_trade_stat(pnl, reason)
+        except Exception as e:
+            logger.warning("Failed to record trade stats: %s", e)
         if pnl != 0:
             try:
                 record_daily_pnl(pnl)

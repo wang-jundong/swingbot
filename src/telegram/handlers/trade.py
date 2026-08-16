@@ -12,6 +12,7 @@ from src.config.telegram import (
     SELL_AMOUNT_ACTION,
 )
 from src.telegram.common import dex_available, get_dex_client, parse_callback
+from src.dex.history.trade_stats import REASON_MANUAL
 from src.telegram.ui.formatters import (
     build_trade_select_message,
     format_buy_result,
@@ -148,9 +149,10 @@ async def on_sell_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     client = get_dex_client(context)
+    reason = REASON_MANUAL
     try:
         tx_hash, success, pnl, balance_before, balance_after = await asyncio.to_thread(
-            client.sell, symbol, amount_label
+            client.sell, symbol, amount_label, reason=reason
         )
         if tx_hash:
             await query.edit_message_text(
@@ -162,6 +164,7 @@ async def on_sell_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     pnl,
                     balance_before,
                     balance_after,
+                    reason,
                 ),
                 parse_mode="HTML",
             )

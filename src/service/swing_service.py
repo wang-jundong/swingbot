@@ -4,7 +4,6 @@ import time
 
 from src.config.solana import SOL_ADDRESS
 from src.config.trading import (
-    HOLD_DAYS,
     MAX_BUYS_PER_TOKEN,
     SECOND_BUY_PRICE_RATIO,
     SELL_PNL_RATIO,
@@ -15,6 +14,7 @@ from src.config.trading import (
 from src.dex.history.transaction import (
     get_pending_buy_transactions_by_symbol,
     get_pending_transactions,
+    is_hold_expired,
 )
 from src.dex.solana.client import DexClient
 from src.integrations.birdeye import scan_tokens
@@ -23,7 +23,7 @@ from src.storage.settings import is_swing_auto_sell_enabled, is_swing_enabled
 from src.telegram.messages import send_buy, send_sell, send_sell_alert
 from src.utils.log_util import get_dex_logger
 from src.utils.number_util import format_decimal, to_float
-from src.utils.time_util import str_to_unix, unix_now, unix_to_str
+from src.utils.time_util import unix_now, unix_to_str
 
 logger = get_dex_logger()
 
@@ -140,7 +140,7 @@ def maybe_sell(client: DexClient, symbol: str, net_cost: float = 0.0) -> None:
     value = current * balance
     pnl = value - net_cost
     threshold = SWING_BUY_AMOUNT * SELL_PNL_RATIO
-    hold_expired = _hold_expired(buys)
+    hold_expired = is_hold_expired(buys)
     if not hold_expired and pnl < threshold:
         logger.info("skip sell %s: pnl %s", symbol, format_decimal(pnl))
         return
@@ -167,11 +167,3 @@ def maybe_sell(client: DexClient, symbol: str, net_cost: float = 0.0) -> None:
 def _first_buy_price(buys: list[dict]) -> float | None:
     first = min(buys, key=lambda row: str(row.get("timestamp") or ""))
     return to_float(first.get("price"))
-
-
-def _hold_expired(buys: list[dict]) -> bool:
-    first = min(buys, key=lambda row: str(row.get("timestamp") or ""))
-    started = str_to_unix(first.get("timestamp"))
-    if started is None:
-        return False
-    return unix_now() - started >= HOLD_DAYS * 86400

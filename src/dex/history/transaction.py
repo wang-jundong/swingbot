@@ -7,6 +7,7 @@ import pandas as pd
 
 from src.config.history import TRANSACTION_COLUMNS
 from src.config.bindings.paths import TRANSACTION_HISTORY_PATHS
+from src.config.trading import HOLD_DAYS
 from src.storage.settings import get_key_id
 from src.utils.number_util import format_decimal
 from src.utils.time_util import unix_now, unix_to_str
@@ -75,6 +76,17 @@ def get_pending_buy_transactions_by_symbol(
         for row in symbol_pending.get("rows", [])
         if str(row.get("action", "")).lower() == "buy"
     ]
+
+
+def is_hold_expired(buys: list[dict]) -> bool:
+    """True when the first pending buy is at least HOLD_DAYS old."""
+    if not buys:
+        return False
+    first = min(buys, key=lambda row: str(row.get("timestamp") or ""))
+    started = str_to_unix(first.get("timestamp"))
+    if started is None:
+        return False
+    return unix_now() - started >= HOLD_DAYS * 86400
 
 
 def save_transaction(

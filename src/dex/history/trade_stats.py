@@ -1,4 +1,4 @@
-"""Cumulative trade statistics for target and hold-period exits."""
+"""Cumulative trade statistics for target, hold, and manual exits."""
 
 import json
 from pathlib import Path
@@ -12,28 +12,41 @@ logger = get_dex_logger()
 
 REASON_TARGET = "target"
 REASON_HOLD = "hold"
+REASON_MANUAL = "manual"
+
+
+def resolve_sell_reason(symbol: str, reason: str | None = None) -> str:
+    """Keep a known sell reason; default missing/unknown to manual."""
+    resolved = str(reason or "").strip().lower()
+    if resolved in (REASON_TARGET, REASON_HOLD, REASON_MANUAL):
+        return resolved
+    return REASON_MANUAL
 
 
 def _new_stats() -> dict[str, float | int]:
     return {
-        "target_buy_count": 0,
-        "target_buy_pnl": 0.0,
+        "target_sell_count": 0,
+        "target_sell_pnl": 0.0,
         "hold_pnl_positive_count": 0,
         "hold_pnl_positive_sum": 0.0,
         "hold_pnl_negative_count": 0,
         "hold_pnl_negative_sum": 0.0,
+        "manual_sell_count": 0,
+        "manual_sell_pnl": 0.0,
         "pnl": 0.0,
     }
 
 
 def _parse_stats(raw: dict) -> dict[str, float | int]:
     stats = _new_stats()
-    stats["target_buy_count"] = int(raw.get("target_buy_count", 0))
-    stats["target_buy_pnl"] = float(raw.get("target_buy_pnl", 0))
+    stats["target_sell_count"] = int(raw.get("target_sell_count", 0))
+    stats["target_sell_pnl"] = float(raw.get("target_sell_pnl", 0))
     stats["hold_pnl_positive_count"] = int(raw.get("hold_pnl_positive_count", 0))
     stats["hold_pnl_positive_sum"] = float(raw.get("hold_pnl_positive_sum", 0))
     stats["hold_pnl_negative_count"] = int(raw.get("hold_pnl_negative_count", 0))
     stats["hold_pnl_negative_sum"] = float(raw.get("hold_pnl_negative_sum", 0))
+    stats["manual_sell_count"] = int(raw.get("manual_sell_count", 0))
+    stats["manual_sell_pnl"] = float(raw.get("manual_sell_pnl", 0))
     stats["pnl"] = float(raw.get("pnl", 0))
     return stats
 
@@ -41,7 +54,7 @@ def _parse_stats(raw: dict) -> dict[str, float | int]:
 def load_trade_stats(
     filepath: Optional[Path | str] = None,
 ) -> dict[str, float | int]:
-    """Load flat target/hold trade stats."""
+    """Load flat target/hold/manual trade stats."""
     path = Path(filepath or TRADE_STATS_PATH)
     if not path.exists():
         return _new_stats()
@@ -51,7 +64,7 @@ def load_trade_stats(
         return _new_stats()
     if not isinstance(raw, dict):
         return _new_stats()
-    if "target_buy_count" not in raw and "pnl" not in raw:
+    if "target_sell_count" not in raw and "pnl" not in raw:
         return _new_stats()
     # Ignore legacy buy_count-bucket format.
     if any(key.isdigit() for key in raw):
@@ -67,12 +80,14 @@ def save_trade_stats(
     path = Path(filepath or TRADE_STATS_PATH)
     path.parent.mkdir(parents=True, exist_ok=True)
     output = {
-        "target_buy_count": str(int(data["target_buy_count"])),
-        "target_buy_pnl": format_decimal(float(data["target_buy_pnl"])),
+        "target_sell_count": str(int(data["target_sell_count"])),
+        "target_sell_pnl": format_decimal(float(data["target_sell_pnl"])),
         "hold_pnl_positive_count": str(int(data["hold_pnl_positive_count"])),
         "hold_pnl_positive_sum": format_decimal(float(data["hold_pnl_positive_sum"])),
         "hold_pnl_negative_count": str(int(data["hold_pnl_negative_count"])),
         "hold_pnl_negative_sum": format_decimal(float(data["hold_pnl_negative_sum"])),
+        "manual_sell_count": str(int(data["manual_sell_count"])),
+        "manual_sell_pnl": format_decimal(float(data["manual_sell_pnl"])),
         "pnl": format_decimal(float(data["pnl"])),
     }
     path.write_text(json.dumps(output, indent=2, ensure_ascii=False))
@@ -83,15 +98,15 @@ def record_trade_stat(
     reason: str,
     filepath: Optional[Path | str] = None,
 ) -> dict[str, float | int]:
-    """Add one max sell to target or hold stats."""
+    """Add one max sell to target, hold, or manual stats."""
     path = Path(filepath or TRADE_STATS_PATH)
     stats = load_trade_stats(path)
     pnl = float(pnl)
     reason = str(reason or "").strip().lower()
 
     if reason == REASON_TARGET:
-        stats["target_buy_count"] += 1
-        stats["target_buy_pnl"] += pnl
+        stats["target_sell_count"] += 1
+        stats["target_sell_pnl"] += pnl
     elif reason == REASON_HOLD:
         if pnl > 0:
             stats["hold_pnl_positive_count"] += 1
@@ -99,6 +114,9 @@ def record_trade_stat(
         elif pnl < 0:
             stats["hold_pnl_negative_count"] += 1
             stats["hold_pnl_negative_sum"] += pnl
+    elif reason == REASON_MANUAL:
+        stats["manual_sell_count"] += 1
+        stats["manual_sell_pnl"] += pnl
     else:
         logger.info("skip trade stats: unknown reason=%s", reason)
         return stats
@@ -106,16 +124,18 @@ def record_trade_stat(
     stats["pnl"] += pnl
     save_trade_stats(stats, path)
     logger.info(
-        "trade stats %s pnl=%s total=%s target=%s/%s hold+=%s/%s hold-=%s/%s",
+        "trade stats %s pnl=%s total=%s target=%s/%s hold+=%s/%s hold-=%s/%s manual=%s/%s",
         reason,
         format_decimal(pnl),
         format_decimal(float(stats["pnl"])),
-        stats["target_buy_count"],
-        format_decimal(float(stats["target_buy_pnl"])),
+        stats["target_sell_count"],
+        format_decimal(float(stats["target_sell_pnl"])),
         stats["hold_pnl_positive_count"],
         format_decimal(float(stats["hold_pnl_positive_sum"])),
         stats["hold_pnl_negative_count"],
         format_decimal(float(stats["hold_pnl_negative_sum"])),
+        stats["manual_sell_count"],
+        format_decimal(float(stats["manual_sell_pnl"])),
     )
     return stats
 

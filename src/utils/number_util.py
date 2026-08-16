@@ -9,6 +9,11 @@ def to_float(value: object) -> float | None:
         return None
 
 
+def rounded(value: object, digits: int) -> float | None:
+    number = to_float(value)
+    return None if number is None else round(number, digits)
+
+
 def format_decimal(val: float, digits: int = 4) -> str:
     """Format float with 4 non-zero decimals, e.g. 9.67e-9 -> 0.000000009678."""
     if val == 0:

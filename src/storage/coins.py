@@ -9,6 +9,7 @@ from typing import Iterator, Optional
 
 from src.config.bindings.paths import COINS_PATH
 from src.utils.address_util import normalize_coin
+from src.utils.number_util import rounded
 
 _thread_lock = threading.Lock()
 
@@ -137,8 +138,8 @@ def append_buy_metrics(
             coin["pair_age"] = _as_list(coin.get("pair_age"))
             coin["filter_reason"] = _as_list(coin.get("filter_reason"))
             coin["buy_time"] = _as_list(coin.get("buy_time"))
-            coin["liquidity"].append(liquidity)
-            coin["pair_age"].append(pair_age)
+            coin["liquidity"].append(rounded(liquidity, 2))
+            coin["pair_age"].append(rounded(pair_age, 2))
             coin["filter_reason"].append(filter_reason)
             coin["buy_time"].append(buy_time)
             _save_unlocked(path, coins)

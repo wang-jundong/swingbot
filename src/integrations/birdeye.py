@@ -19,6 +19,7 @@ from src.config.birdeye import (
     PAIR_AGE_DAYS_MIN,
     PRICE_CHANGE_DROP_PCT,
     PRICE_RANGE_MAX_PCT,
+    PUMP_FUN_MINT_SUFFIX,
     REQUEST_PAUSE_SEC,
     TXNS_H24_MIN,
 )
@@ -51,11 +52,18 @@ def headers() -> dict:
 def scan_tokens() -> list[dict]:
     matched = []
     for token in fetch_token_list():
+        if not is_pump_fun_token(token):
+            continue
         if not price_range_filters(token) or not price_change_filters(token):
             continue
         token["filter_reason"] = describe_filter_match(token)
         matched.append(token)
     return matched
+
+
+def is_pump_fun_token(token: dict) -> bool:
+    address = token.get("address") or ""
+    return str(address).endswith(PUMP_FUN_MINT_SUFFIX)
 
 
 def fetch_token_list() -> list[dict]:

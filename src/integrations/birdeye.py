@@ -33,11 +33,13 @@ def headers() -> dict:
 
 
 def scan_tokens() -> list[dict]:
-    tokens = fetch_token_list()
-    return [
-        token for token in tokens
-        if price_range_filters(token) and price_change_filters(token)
-    ]
+    matched = []
+    for token in fetch_token_list():
+        if not price_range_filters(token) or not price_change_filters(token):
+            continue
+        token["filter_reason"] = describe_filter_match(token)
+        matched.append(token)
+    return matched
 
 
 def fetch_token_list() -> list[dict]:
@@ -132,6 +134,10 @@ def price_range_filters(token: dict) -> bool:
 
 
 def price_change_filters(token: dict) -> bool:
+    return pass_reason(token) is not None
+
+
+def pass_reason(token: dict) -> str | None:
     change_1h = token.get("price_change_1h_percent")
     change_2h = token.get("price_change_2h_percent")
     change_4h = token.get("price_change_4h_percent")
@@ -139,15 +145,37 @@ def price_change_filters(token: dict) -> bool:
     changes = [change_1h, change_2h, change_4h, change_8h]
 
     if change_1h is not None and change_1h < PRICE_CHANGE_DROP_PCT:
-        return True
+        return f"pass_1h={change_1h:.1f}%"
 
     if all(c is not None and c < 0 for c in changes) and any(
         c < PRICE_CHANGE_DROP_PCT for c in changes
     ):
-        return True
+        labels = ("1h", "2h", "4h", "8h")
+        passed = ", ".join(
+            f"{label}={change:.1f}%"
+            for label, change in zip(labels, changes)
+            if change < PRICE_CHANGE_DROP_PCT
+        )
+        return f"pass_all_down({passed})"
 
     vs_high_pct = token.get("price_vs_1h_high_pct")
-    return vs_high_pct is not None and vs_high_pct < PRICE_CHANGE_DROP_PCT
+    if vs_high_pct is not None and vs_high_pct < PRICE_CHANGE_DROP_PCT:
+        return f"pass_vs_1h_high={vs_high_pct:.1f}%"
+    return None
+
+
+def range_reason(token: dict) -> str:
+    parts = []
+    for timeframe, max_pct in PRICE_RANGE_MAX_PCT.items():
+        range_pct = token.get(f"price_range_{timeframe}_pct")
+        if range_pct is not None and range_pct < max_pct:
+            parts.append(f"range_{timeframe}={range_pct:.1f}%")
+    return ", ".join(parts)
+
+
+def describe_filter_match(token: dict) -> str:
+    parts = [part for part in (range_reason(token), pass_reason(token)) if part]
+    return ", ".join(parts)
 
 
 def normalize_token(item: dict, now: int) -> dict:

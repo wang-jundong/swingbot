@@ -23,7 +23,7 @@ from src.storage.settings import is_swing_auto_sell_enabled, is_swing_enabled
 from src.telegram.messages import send_buy, send_sell, send_sell_alert
 from src.utils.log_util import get_dex_logger
 from src.utils.number_util import format_decimal, to_float
-from src.utils.time_util import str_to_unix, unix_now
+from src.utils.time_util import str_to_unix, unix_now, unix_to_str
 
 logger = get_dex_logger()
 
@@ -105,6 +105,8 @@ def maybe_buy(client: DexClient, coin: dict) -> None:
                 address,
                 coin.get("liquidity_usd"),
                 coin.get("pair_age_days"),
+                coin.get("filter_reason"),
+                unix_to_str(unix_now()),
             )
         except Exception:
             logger.exception("failed to save buy metrics %s", symbol)

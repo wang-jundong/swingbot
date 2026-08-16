@@ -29,6 +29,7 @@ def _format_token(token: dict) -> str:
         f"chg4h={_pct(token.get('price_change_4h_percent'))} "
         f"chg8h={_pct(token.get('price_change_8h_percent'))} "
         f"vs1h={_pct(token.get('price_vs_1h_high_pct'))} "
+        f"reason={token.get('filter_reason') or '?'} "
         f"addr={token.get('address')}"
     )
 

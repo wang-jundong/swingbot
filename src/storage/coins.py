@@ -110,6 +110,7 @@ def upsert_scanned_tokens(
                 **coin,
                 "liquidity_usd": token.get("liquidity_usd"),
                 "pair_age_days": token.get("pair_age_days"),
+                "filter_reason": token.get("filter_reason"),
             })
 
         if added:
@@ -121,9 +122,11 @@ def append_buy_metrics(
     address: str,
     liquidity: float | None,
     pair_age: float | None,
+    filter_reason: str | None,
+    buy_time: str | None,
     filepath: Optional[str] = None,
 ) -> None:
-    """Append liquidity and pair age from a buy onto the stored coin."""
+    """Append liquidity, pair age, and filter match from a buy onto the stored coin."""
     path = Path(filepath or COINS_PATH)
     with _coins_lock(path):
         coins = _load_unlocked(path)
@@ -132,8 +135,12 @@ def append_buy_metrics(
                 continue
             coin["liquidity"] = _as_list(coin.get("liquidity"))
             coin["pair_age"] = _as_list(coin.get("pair_age"))
+            coin["filter_reason"] = _as_list(coin.get("filter_reason"))
+            coin["buy_time"] = _as_list(coin.get("buy_time"))
             coin["liquidity"].append(liquidity)
             coin["pair_age"].append(pair_age)
+            coin["filter_reason"].append(filter_reason)
+            coin["buy_time"].append(buy_time)
             _save_unlocked(path, coins)
             return
 

@@ -57,7 +57,7 @@ def format_buy_result(
     """Buy result message (HTML)."""
     suffix = "✅" if success else "❌"
     lines = [
-        f"🟢 <b>BUY</b> <b>{symbol}</b> — {amount}",
+        f"🟢 <b>BUY</b> {format_token_link(symbol)} — {amount}",
         f"<a href='{TX_EXPLORER.format(tx_hash)}'>{suffix} Open Transaction</a>",
     ]
     if success and balance_before is not None and balance_after is not None:
@@ -83,7 +83,7 @@ def format_sell_result(
     """Sell result message (HTML)."""
     suffix = "✅" if success else "❌"
     lines = [
-        f"🔴 <b>SELL</b> <b>{symbol}</b> — {amount} ({reason})",
+        f"🔴 <b>SELL</b> {format_token_link(symbol)} — {amount} ({reason})",
         f"<a href='{TX_EXPLORER.format(tx_hash)}'>{suffix} Open Transaction</a>",
     ]
     if success:

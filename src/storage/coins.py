@@ -146,6 +146,27 @@ def append_buy_metrics(
             return
 
 
+def append_sell_metrics(
+    symbol: str,
+    pnl: float | None,
+    reason: str | None,
+    filepath: Optional[str] = None,
+) -> None:
+    """Append realized PnL and sell reason onto the stored coin."""
+    path = Path(filepath or COINS_PATH)
+    with _coins_lock(path):
+        coins = _load_unlocked(path)
+        for coin in coins:
+            if coin.get("symbol") != symbol:
+                continue
+            coin["pnl"] = _as_list(coin.get("pnl"))
+            coin["sell_reason"] = _as_list(coin.get("sell_reason"))
+            coin["pnl"].append(rounded(pnl, 4))
+            coin["sell_reason"].append(reason)
+            _save_unlocked(path, coins)
+            return
+
+
 def _as_list(value) -> list:
     if isinstance(value, list):
         return list(value)

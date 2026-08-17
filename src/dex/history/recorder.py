@@ -5,6 +5,7 @@ from typing import Union
 from src.dex.history.daily_pnl import record_daily_pnl
 from src.dex.history.trade_stats import record_trade_stat, resolve_sell_reason
 from src.dex.history.transaction import save_transaction, close_symbol_and_calculate_pnl
+from src.storage.coins import append_sell_metrics
 from src.utils.log_util import get_dex_logger
 
 logger = get_dex_logger()
@@ -54,6 +55,10 @@ def record_sell(
                 record_daily_pnl(pnl)
             except Exception as e:
                 logger.warning("Failed to record daily PnL: %s", e)
+        try:
+            append_sell_metrics(symbol, pnl, reason)
+        except Exception as e:
+            logger.warning("Failed to save sell metrics: %s", e)
         return pnl
 
     try:

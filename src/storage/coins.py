@@ -10,6 +10,7 @@ from typing import Iterator, Optional
 from src.config.bindings.paths import COINS_PATH
 from src.utils.address_util import normalize_coin
 from src.utils.number_util import rounded
+from src.utils.time_util import unix_now, unix_to_str
 
 _thread_lock = threading.Lock()
 
@@ -46,6 +47,7 @@ def _load_unlocked(path: Path) -> list[dict]:
 def _save_unlocked(path: Path, coins: list[dict]) -> None:
     """Persist coins to JSON atomically."""
     path.parent.mkdir(parents=True, exist_ok=True)
+    _uniquify_symbols(coins)
     payload = json.dumps(coins, indent=2, ensure_ascii=False)
     tmp = path.with_suffix(f"{path.suffix}.tmp")
     tmp.write_text(payload)
@@ -86,7 +88,9 @@ def upsert_scanned_tokens(
     path = Path(filepath or COINS_PATH)
     with _coins_lock(path):
         coins = _load_unlocked(path)
+        renamed = _uniquify_symbols(coins)
         by_address = {c["address"]: c for c in coins if c.get("address")}
+        taken = {c["symbol"] for c in coins if c.get("symbol")}
         scanned = []
         added = 0
 
@@ -97,7 +101,8 @@ def upsert_scanned_tokens(
 
             coin = by_address.get(address)
             if coin is None:
-                symbol = token.get("symbol") or "UNK"
+                symbol = _unique_symbol(token.get("symbol") or "UNK", taken)
+                taken.add(symbol)
                 coin = {
                     "name": token.get("name") or symbol,
                     "symbol": symbol,
@@ -107,6 +112,7 @@ def upsert_scanned_tokens(
                 by_address[address] = coin
                 added += 1
 
+            _increment_scan_count(coin)
             scanned.append({
                 **coin,
                 "liquidity_usd": token.get("liquidity_usd"),
@@ -114,7 +120,7 @@ def upsert_scanned_tokens(
                 "filter_reason": token.get("filter_reason"),
             })
 
-        if added:
+        if added or renamed or scanned:
             _save_unlocked(path, coins)
         return scanned, added
 
@@ -152,7 +158,7 @@ def append_sell_metrics(
     reason: str | None,
     filepath: Optional[str] = None,
 ) -> None:
-    """Append realized PnL and sell reason onto the stored coin."""
+    """Append realized PnL, sell reason, and sell time onto the stored coin."""
     path = Path(filepath or COINS_PATH)
     with _coins_lock(path):
         coins = _load_unlocked(path)
@@ -161,8 +167,10 @@ def append_sell_metrics(
                 continue
             coin["pnl"] = _as_list(coin.get("pnl"))
             coin["sell_reason"] = _as_list(coin.get("sell_reason"))
+            coin["sell_time"] = _as_list(coin.get("sell_time"))
             coin["pnl"].append(rounded(pnl, 4))
             coin["sell_reason"].append(reason)
+            coin["sell_time"].append(unix_to_str(unix_now()))
             _save_unlocked(path, coins)
             return
 
@@ -173,3 +181,35 @@ def _as_list(value) -> list:
     if value is None:
         return []
     return [value]
+
+
+def _increment_scan_count(coin: dict) -> None:
+    """Add to the open scan-match round, or start a new one after a sell."""
+    counts = _as_list(coin.get("scan_count"))
+    if len(counts) <= len(_as_list(coin.get("sell_time"))):
+        counts.append(1)
+    else:
+        counts[-1] = int(counts[-1] or 0) + 1
+    coin["scan_count"] = counts
+
+
+def _unique_symbol(symbol: str, taken: set[str]) -> str:
+    if symbol not in taken:
+        return symbol
+    n = 2
+    while f"{symbol}_{n}" in taken:
+        n += 1
+    return f"{symbol}_{n}"
+
+
+def _uniquify_symbols(coins: list[dict]) -> bool:
+    taken: set[str] = set()
+    changed = False
+    for coin in coins:
+        symbol = coin.get("symbol") or "UNK"
+        unique = _unique_symbol(symbol, taken)
+        taken.add(unique)
+        if coin.get("symbol") != unique:
+            coin["symbol"] = unique
+            changed = True
+    return changed

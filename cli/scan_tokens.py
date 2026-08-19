@@ -18,6 +18,8 @@ def _format_token(token: dict) -> str:
         f"{token.get('symbol') or '?':<12} "
         f"liq={token.get('liquidity_usd') or 0:,.0f} "
         f"vol24={token.get('volume_24h_usd') or 0:,.0f} "
+        f"vol1h={token.get('volume_1h_usd') or 0:,.0f} "
+        f"vol1hchg={_pct(token.get('volume_1h_change_percent'))} "
         f"age={_age(token.get('pair_age_days'))} "
         f"holders={token.get('holders')} "
         f"tx24={token.get('txns_h24')} "

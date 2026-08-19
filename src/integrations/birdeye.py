@@ -22,6 +22,7 @@ from src.config.birdeye import (
     PUMP_FUN_MINT_SUFFIX,
     REQUEST_PAUSE_SEC,
     TXNS_H24_MIN,
+    VOLUME_1H_CHANGE_PCT_MIN,
     VOLUME_24H_USD_MIN,
 )
 
@@ -71,7 +72,9 @@ def is_pump_fun_token(token: dict) -> bool:
 
 def volume_filters(token: dict) -> bool:
     volume = token.get("volume_24h_usd")
-    return volume is not None and volume > VOLUME_24H_USD_MIN
+    if volume is None or volume <= VOLUME_24H_USD_MIN:
+        return False
+    return volume_reason(token) is not None
 
 
 def fetch_token_list() -> list[dict]:
@@ -205,8 +208,29 @@ def range_reason(token: dict) -> str:
     return ", ".join(parts)
 
 
+def volume_reason(token: dict) -> str | None:
+    change_1h = token.get("volume_1h_change_percent")
+    if change_1h is not None and change_1h > VOLUME_1H_CHANGE_PCT_MIN:
+        return f"vol_1h_chg={change_1h:.1f}%"
+
+    vol_1h = token.get("volume_1h_usd")
+    vol_24h = token.get("volume_24h_usd")
+    if (
+        vol_1h is not None
+        and vol_24h is not None
+        and vol_24h > 0
+        and vol_1h * 24 > vol_24h
+    ):
+        return f"vol_1h_hot={vol_1h:.0f}*24>{vol_24h:.0f}"
+    return None
+
+
 def describe_filter_match(token: dict) -> str:
-    parts = [part for part in (range_reason(token), pass_reason(token)) if part]
+    parts = [
+        part
+        for part in (volume_reason(token), range_reason(token), pass_reason(token))
+        if part
+    ]
     return ", ".join(parts)
 
 
@@ -218,6 +242,8 @@ def normalize_token(item: dict, now: int) -> dict:
         "symbol": item.get("symbol"),
         "address": item.get("address"),
         "liquidity_usd": item.get("liquidity"),
+        "volume_1h_usd": item.get("volume_1h_usd"),
+        "volume_1h_change_percent": item.get("volume_1h_change_percent"),
         "volume_24h_usd": item.get("volume_24h_usd"),
         "pair_age_days": age_days,
         "holders": item.get("holder"),

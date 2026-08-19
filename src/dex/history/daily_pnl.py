@@ -8,7 +8,7 @@ from src.config.bindings.paths import DAILY_PNL_PATHS
 from src.storage.settings import get_key_id
 from src.utils.log_util import get_dex_logger
 from src.utils.number_util import format_decimal
-from src.utils.time_util import unix_now, unix_to_str
+from src.utils.time_util import local_date
 
 logger = get_dex_logger()
 
@@ -29,8 +29,8 @@ def _day_pnl(value) -> float:
 
 
 def date_key(unix_ts: Optional[int] = None) -> str:
-    """YYYY-MM-DD"""
-    return unix_to_str(unix_ts if unix_ts is not None else unix_now())[:10]
+    """YYYY-MM-DD in Asia/Vladivostok."""
+    return local_date(unix_ts)
 
 
 def load_daily_pnl(filepath: Optional[Path | str] = None) -> dict[str, float]:

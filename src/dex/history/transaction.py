@@ -41,6 +41,13 @@ def _net_cost_for_symbol(df: pd.DataFrame, symbol: str) -> float:
     return float(total_buy - total_sell)
 
 
+def pnl_native(price: float | None, balance: float | None, net_cost: float) -> float | None:
+    """Unrealized PnL: current value minus net buy cost."""
+    if price is None or balance is None:
+        return None
+    return (price * balance) - net_cost
+
+
 def get_pending_transactions(filepath: Optional[Path | str] = None) -> dict[str, dict]:
     """Pending transactions per symbol."""
     path = _history_path(filepath)

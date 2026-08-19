@@ -92,3 +92,33 @@ def get_token_balance_raw(rpc_url: str, owner: str, address: str) -> int:
 def get_token_balance(rpc_url: str, owner: str, address: str, decimals: int) -> float:
     """SPL token balance (human units)."""
     return raw_to_ui(get_token_balance_raw(rpc_url, owner, address), decimals)
+
+
+def get_owner_token_balances(rpc_url: str, owner: str) -> dict[str, float]:
+    """Mint → human balance for every SPL and Token-2022 account."""
+    balances: dict[str, float] = {}
+    for program_id in (str(TOKEN_PROGRAM_ID), str(TOKEN_2022_PROGRAM_ID)):
+        result = rpc_request(
+            rpc_url,
+            "getTokenAccountsByOwner",
+            [
+                owner,
+                {"programId": program_id},
+                {"encoding": "jsonParsed", "commitment": "confirmed"},
+            ],
+        )
+        for account in result.get("value") or []:
+            info = (
+                account.get("account", {})
+                .get("data", {})
+                .get("parsed", {})
+                .get("info", {})
+            )
+            mint = info.get("mint")
+            token_amount = info.get("tokenAmount") or {}
+            ui_amount = token_amount.get("uiAmount")
+            if not mint:
+                continue
+            amount = float(ui_amount) if ui_amount is not None else 0.0
+            balances[mint] = balances.get(mint, 0.0) + amount
+    return balances

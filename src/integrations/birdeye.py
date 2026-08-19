@@ -22,6 +22,7 @@ from src.config.birdeye import (
     PUMP_FUN_MINT_SUFFIX,
     REQUEST_PAUSE_SEC,
     TXNS_H24_MIN,
+    VOLUME_24H_USD_MIN,
 )
 
 SECONDS_PER_DAY = 86400
@@ -54,6 +55,8 @@ def scan_tokens() -> list[dict]:
     for token in fetch_token_list():
         if not is_pump_fun_token(token):
             continue
+        if not volume_filters(token):
+            continue
         if not price_range_filters(token) or not price_change_filters(token):
             continue
         token["filter_reason"] = describe_filter_match(token)
@@ -64,6 +67,11 @@ def scan_tokens() -> list[dict]:
 def is_pump_fun_token(token: dict) -> bool:
     address = token.get("address") or ""
     return str(address).endswith(PUMP_FUN_MINT_SUFFIX)
+
+
+def volume_filters(token: dict) -> bool:
+    volume = token.get("volume_24h_usd")
+    return volume is not None and volume > VOLUME_24H_USD_MIN
 
 
 def fetch_token_list() -> list[dict]:
@@ -210,6 +218,7 @@ def normalize_token(item: dict, now: int) -> dict:
         "symbol": item.get("symbol"),
         "address": item.get("address"),
         "liquidity_usd": item.get("liquidity"),
+        "volume_24h_usd": item.get("volume_24h_usd"),
         "pair_age_days": age_days,
         "holders": item.get("holder"),
         "txns_h24": item.get("trade_24h_count"),

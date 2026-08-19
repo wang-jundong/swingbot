@@ -112,10 +112,11 @@ def upsert_scanned_tokens(
                 by_address[address] = coin
                 added += 1
 
-            _increment_scan_count(coin)
+            _append_scan_metrics(coin, token)
             scanned.append({
                 **coin,
                 "liquidity_usd": token.get("liquidity_usd"),
+                "volume_24h_usd": token.get("volume_24h_usd"),
                 "pair_age_days": token.get("pair_age_days"),
                 "filter_reason": token.get("filter_reason"),
             })
@@ -131,9 +132,10 @@ def append_buy_metrics(
     pair_age: float | None,
     filter_reason: str | None,
     buy_time: str | None,
+    volume_24h_usd: float | None = None,
     filepath: Optional[str] = None,
 ) -> None:
-    """Append liquidity, pair age, and filter match from a buy onto the stored coin."""
+    """Append liquidity, volume, pair age, and filter match from a buy onto the stored coin."""
     path = Path(filepath or COINS_PATH)
     with _coins_lock(path):
         coins = _load_unlocked(path)
@@ -141,13 +143,16 @@ def append_buy_metrics(
             if coin.get("address") != address:
                 continue
             coin["liquidity"] = _as_list(coin.get("liquidity"))
+            coin["volume_24h_usd"] = _as_list(coin.get("volume_24h_usd"))
             coin["pair_age"] = _as_list(coin.get("pair_age"))
             coin["filter_reason"] = _as_list(coin.get("filter_reason"))
             coin["buy_time"] = _as_list(coin.get("buy_time"))
             coin["liquidity"].append(rounded(liquidity, 2))
+            coin["volume_24h_usd"].append(rounded(volume_24h_usd, 2))
             coin["pair_age"].append(rounded(pair_age, 2))
             coin["filter_reason"].append(filter_reason)
             coin["buy_time"].append(buy_time)
+            _start_scan_round_on_buy(coin)
             _save_unlocked(path, coins)
             return
 
@@ -175,22 +180,53 @@ def append_sell_metrics(
             return
 
 
+def _append_scan_metrics(coin: dict, token: dict) -> None:
+    """Append one scan match onto the current buy group."""
+    rounds = _scan_rounds(coin)
+    if not rounds:
+        rounds.append([])
+    rounds[-1].append({
+        "liquidity_usd": rounded(token.get("liquidity_usd"), 2),
+        "volume_24h_usd": rounded(token.get("volume_24h_usd"), 2),
+        "scan_time": unix_to_str(unix_now()),
+        "price": rounded(token.get("price"), 10),
+        "filter_reason": token.get("filter_reason"),
+    })
+    coin["scans"] = rounds
+    _sync_scan_count(coin)
+
+
+def _start_scan_round_on_buy(coin: dict) -> None:
+    """This buy's scan starts a new group; earlier scans stay in the previous one."""
+    rounds = _scan_rounds(coin)
+    if not rounds or len(rounds[-1]) <= 1:
+        _sync_scan_count(coin)
+        return
+    last = rounds[-1].pop()
+    rounds.append([last])
+    coin["scans"] = rounds
+    _sync_scan_count(coin)
+
+
+def _sync_scan_count(coin: dict) -> None:
+    coin["scan_count"] = [len(row) for row in _scan_rounds(coin)]
+
+
+def _scan_rounds(coin: dict) -> list[list]:
+    rounds = coin.get("scans")
+    if not isinstance(rounds, list) or not rounds:
+        return []
+    if isinstance(rounds[0], dict):
+        return [list(rounds)]
+    return [row if isinstance(row, list) else [] for row in rounds]
+
+
 def _as_list(value) -> list:
     if isinstance(value, list):
         return list(value)
     if value is None:
         return []
     return [value]
-
-
-def _increment_scan_count(coin: dict) -> None:
-    """Add to the open scan-match round, or start a new one after a sell."""
-    counts = _as_list(coin.get("scan_count"))
-    if len(counts) <= len(_as_list(coin.get("sell_time"))):
-        counts.append(1)
-    else:
-        counts[-1] = int(counts[-1] or 0) + 1
-    coin["scan_count"] = counts
 
 
 def _unique_symbol(symbol: str, taken: set[str]) -> str:

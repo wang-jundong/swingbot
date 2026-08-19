@@ -14,12 +14,11 @@ def main() -> int:
 
 
 def _format_token(token: dict) -> str:
-    age = token.get("pair_age_days")
-    age_text = f"{age:.2f}d" if age is not None else "?"
     return (
         f"{token.get('symbol') or '?':<12} "
         f"liq={token.get('liquidity_usd') or 0:,.0f} "
-        f"age={age_text} "
+        f"vol24={token.get('volume_24h_usd') or 0:,.0f} "
+        f"age={_age(token.get('pair_age_days'))} "
         f"holders={token.get('holders')} "
         f"tx24={token.get('txns_h24')} "
         f"range24={_pct(token.get('price_range_24h_pct'))} "
@@ -32,6 +31,13 @@ def _format_token(token: dict) -> str:
         f"reason={token.get('filter_reason') or '?'} "
         f"addr={token.get('address')}"
     )
+
+
+def _age(days: float | None) -> str:
+    if days is None:
+        return "?"
+    hours = max(0, round(days * 24))
+    return f"{hours // 24}d {hours % 24}h"
 
 
 def _pct(value: float | None) -> str:

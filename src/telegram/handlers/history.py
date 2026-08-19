@@ -6,7 +6,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from src.config.solana import NATIVE_CURRENCY
-from src.dex.history.transaction import get_pending_transactions
+from src.dex.history.transaction import get_pending_transactions, pnl_native
 from src.telegram.ui.formatters import (
     format_history_row,
     format_token_link,
@@ -55,10 +55,10 @@ async def on_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     lines.append("   <i>—</i>")
                 else:
                     price, bal = res
-                    if price is not None and bal is not None:
-                        pnl_native = (price * bal) - net_cost
+                    pnl = pnl_native(price, bal, net_cost)
+                    if pnl is not None:
                         lines.extend(
-                            format_token_summary(price, bal, pnl_native, currency=NATIVE_CURRENCY)
+                            format_token_summary(price, bal, pnl, currency=NATIVE_CURRENCY)
                         )
                     else:
                         lines.append("   <i>—</i>")

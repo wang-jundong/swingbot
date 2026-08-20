@@ -241,6 +241,7 @@ PAGE_HTML = """<!DOCTYPE html>
   </div>
   <script>
     const DEX = "https://dexscreener.com/solana/";
+    const GMGN = "https://gmgn.ai/sol/token/";
     const SOL = "https://solscan.io/token/";
     let tokens = [];
     let selected = null;
@@ -444,7 +445,7 @@ PAGE_HTML = """<!DOCTYPE html>
             <td>${esc(s.scan_time || "—")}${si === 0 ? ' <span class="reason">buy</span>' : ""}</td>
             <td>${usd(s.liquidity_usd)}</td>
             <td>${usd(s.volume_24h_usd)}</td>
-            <td>${tokenPrice(s.price)}</td>
+            <td>${s.price == null || s.price === "" ? "—" : tokenPrice(s.price) + " SOL"}</td>
             <td class="reason">${esc(s.filter_reason || "—")}</td>
           </tr>`).join("") || `<tr><td colspan="5" class="reason">Empty group.</td></tr>`;
         return `
@@ -461,9 +462,11 @@ PAGE_HTML = """<!DOCTYPE html>
           <span>${esc(t.address)}</span>
           <button class="chip" data-copy="${esc(t.address)}">Copy</button>
           ${t.address ? `<a href="${DEX}${encodeURIComponent(t.address)}" target="_blank" rel="noreferrer">Dexscreener</a>
+          <a href="${GMGN}${encodeURIComponent(t.address)}" target="_blank" rel="noreferrer">GMGN</a>
           <a href="${SOL}${encodeURIComponent(t.address)}" target="_blank" rel="noreferrer">Solscan</a>` : ""}
         </div>
         <div class="cards">
+          <div class="card"><span>Price</span><b>${t.price == null || t.price === "" ? "—" : tokenPrice(t.price) + " SOL"}</b></div>
           <div class="card"><span>Liquidity</span><b>${usd(t.liquidity_usd)}</b></div>
           <div class="card"><span>Pair age</span><b>${age(t.pair_age ?? t.last_pair_age)}</b></div>
           <div class="card"><span>24h volume</span><b>${usd(t.volume_24h)}</b></div>

@@ -5,6 +5,8 @@ import time
 from pathlib import Path
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from src.config.bindings.binding import BINDINGS
 from src.config.bindings.paths import BIRDEYE_PATH
@@ -25,9 +27,35 @@ from src.config.birdeye import (
     VOLUME_1H_CHANGE_PCT_MIN,
     VOLUME_24H_USD_MIN,
 )
+from src.dex.solana.jupiter.markets import fetch_sol_usd, price_sol
+from src.utils.log_util import get_dex_logger
 
 SECONDS_PER_DAY = 86400
 REQUEST_TIMEOUT_SEC = 30
+REQUEST_RETRIES = 3
+REQUEST_RETRY_BACKOFF_SEC = 0.5
+
+logger = get_dex_logger()
+
+
+def _http_session() -> requests.Session:
+    retry = Retry(
+        total=REQUEST_RETRIES,
+        connect=REQUEST_RETRIES,
+        read=REQUEST_RETRIES,
+        backoff_factor=REQUEST_RETRY_BACKOFF_SEC,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=("GET",),
+        raise_on_status=False,
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session = requests.Session()
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
+
+
+_SESSION = _http_session()
 
 
 def api_key() -> str:
@@ -62,7 +90,16 @@ def scan_tokens() -> list[dict]:
             continue
         token["filter_reason"] = describe_filter_match(token)
         matched.append(token)
+    _prices_to_sol(matched)
     return matched
+
+
+def _prices_to_sol(tokens: list[dict]) -> None:
+    if not tokens:
+        return
+    sol_usd = fetch_sol_usd()
+    for token in tokens:
+        token["price"] = price_sol(token.get("price"), sol_usd)
 
 
 def is_pump_fun_token(token: dict) -> bool:
@@ -93,15 +130,19 @@ def fetch_token_list() -> list[dict]:
     tokens = []
     for page in range(MAX_PAGES):
         params["offset"] = page * PAGE_LIMIT
-        response = requests.get(
-            BIRDEYE_TOKEN_LIST_URL,
-            headers=headers(),
-            params=params,
-            timeout=REQUEST_TIMEOUT_SEC,
-        )
-        response.raise_for_status()
+        try:
+            response = _SESSION.get(
+                BIRDEYE_TOKEN_LIST_URL,
+                headers=headers(),
+                params=params,
+                timeout=REQUEST_TIMEOUT_SEC,
+            )
+            response.raise_for_status()
+            data = response.json().get("data") or {}
+        except (requests.RequestException, ValueError):
+            logger.exception("birdeye token list page %d failed", page)
+            break
 
-        data = response.json().get("data") or {}
         items = data.get("items") or []
         if not items:
             break
@@ -117,7 +158,7 @@ def fetch_price_stats(
     address: str, timeframes: list[str],
 ) -> dict[str, dict] | None:
     try:
-        response = requests.get(
+        response = _SESSION.get(
             BIRDEYE_PRICE_STATS_URL,
             headers=headers(),
             params={"address": address, "list_timeframe": ",".join(timeframes)},

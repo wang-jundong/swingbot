@@ -19,6 +19,26 @@ CHUNK_SIZE = 100
 SECONDS_PER_DAY = 86400
 
 
+def fetch_sol_usd() -> float | None:
+    """SOL price in USD from the Jupiter token search used by market stats."""
+    try:
+        rows = _search([SOL_ADDRESS])
+    except Exception:
+        logger.exception("Jupiter SOL price failed")
+        return None
+    for row in rows:
+        if str(row.get("id") or "") == SOL_ADDRESS:
+            return to_float(row.get("usdPrice"))
+    return None
+
+
+def price_sol(usd_price: float | None, sol_usd: float | None) -> float | None:
+    """Convert a USD token price to SOL."""
+    if usd_price is None or sol_usd is None or sol_usd <= 0:
+        return None
+    return usd_price / sol_usd
+
+
 def fetch_token_markets(addresses: list[str]) -> dict[str, dict]:
     """Liquidity in SOL, pair age, 24h volume, and 24h txns keyed by mint."""
     unique = [address for address in dict.fromkeys(addresses) if address]
@@ -40,7 +60,7 @@ def fetch_token_markets(addresses: list[str]) -> dict[str, dict]:
     sol_usd = (markets.get(SOL_ADDRESS) or {}).get("usd_price")
     for mint, stats in markets.items():
         stats["liquidity"] = _liquidity_sol(stats.get("liquidity_usd"), sol_usd)
-        stats["price"] = _price_sol(stats.get("usd_price"), sol_usd)
+        stats["price"] = price_sol(stats.get("usd_price"), sol_usd)
     return {mint: stats for mint, stats in markets.items() if mint != SOL_ADDRESS}
 
 
@@ -83,12 +103,6 @@ def _liquidity_sol(liquidity_usd: float | None, sol_usd: float | None) -> float 
     if liquidity_usd is None or sol_usd is None or sol_usd <= 0:
         return None
     return round(liquidity_usd / sol_usd, 4)
-
-
-def _price_sol(usd_price: float | None, sol_usd: float | None) -> float | None:
-    if usd_price is None or sol_usd is None or sol_usd <= 0:
-        return None
-    return usd_price / sol_usd
 
 
 def _pair_age_days(row: dict) -> float | None:

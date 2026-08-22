@@ -340,8 +340,13 @@ PAGE_HTML = """<!DOCTYPE html>
       ].map(([k, v, c]) => `<div class="stat"><b class="${c || ""}">${esc(v)}</b><span>${k}</span></div>`).join("");
     }
 
+    function hasSold(t) {
+      return t.status === "sold" || (t.sell_count || 0) > 0;
+    }
+
     function rowPnl(t) {
-      return t.status === "sold" ? t.total_pnl : t.net_pnl;
+      if (statusFilter === "sold" || t.status === "sold") return t.total_pnl;
+      return t.net_pnl;
     }
 
     function rowAge(t) {
@@ -364,7 +369,8 @@ PAGE_HTML = """<!DOCTYPE html>
     function visible() {
       const q = $("q").value.trim().toLowerCase();
       const rows = tokens.filter(t => {
-        if (statusFilter !== "all" && t.status !== statusFilter) return false;
+        if (statusFilter === "open" && t.status !== "open") return false;
+        if (statusFilter === "sold" && !hasSold(t)) return false;
         if (!q) return true;
         return [t.symbol, t.name, t.address].some(v => String(v || "").toLowerCase().includes(q));
       });
@@ -390,7 +396,9 @@ PAGE_HTML = """<!DOCTYPE html>
     }
 
     function rowMeta(t) {
-      if (t.status === "sold") return { text: pnl(t.total_pnl), cls: cls(t.total_pnl) };
+      if (statusFilter === "sold" || t.status === "sold") {
+        return { text: pnl(t.total_pnl), cls: cls(t.total_pnl) };
+      }
       return { text: pnl(t.net_pnl), cls: cls(t.net_pnl) };
     }
 

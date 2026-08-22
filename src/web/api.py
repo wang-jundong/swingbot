@@ -152,7 +152,11 @@ def tokens_payload(*, live: bool = False) -> dict:
         _attach_market_stats(tokens)
         _attach_net_pnls(tokens, pending)
     open_count = sum(1 for token in tokens if token["status"] == "open")
-    sold_count = sum(1 for token in tokens if token["status"] == "sold")
+    sold_count = sum(
+        1
+        for token in tokens
+        if token["status"] == "sold" or token["sell_count"] > 0
+    )
     stats = get_trade_stats()
     return {
         "tokens": tokens,

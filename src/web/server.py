@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 from src.config.web import WEB_HOST, WEB_PORT
+from src.utils.log_util import log_formatter
 from src.web.api import tokens_payload
 from src.web.page import PAGE_HTML
 
@@ -15,7 +16,7 @@ def _logger() -> logging.Logger:
     if not logger.handlers:
         logger.setLevel(logging.INFO)
         handler = logging.StreamHandler()
-        handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+        handler.setFormatter(log_formatter())
         logger.addHandler(handler)
     return logger
 

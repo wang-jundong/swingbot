@@ -210,30 +210,35 @@ def price_range_filters(token: dict) -> bool:
 
 
 def price_change_filters(token: dict) -> bool:
+    if pass_all_down(token):
+        return False
     return pass_reason(token) is not None
 
 
-def pass_reason(token: dict) -> str | None:
-    change_1h = token.get("price_change_1h_percent")
-    change_2h = token.get("price_change_2h_percent")
-    change_4h = token.get("price_change_4h_percent")
-    change_8h = token.get("price_change_8h_percent")
-    changes = [change_1h, change_2h, change_4h, change_8h]
+def pass_all_down(token: dict) -> bool:
+    changes = [
+        token.get("price_change_1h_percent"),
+        token.get("price_change_2h_percent"),
+        token.get("price_change_4h_percent"),
+        token.get("price_change_8h_percent"),
+    ]
+    return all(c is not None and c < 0 for c in changes) and any(
+        c < PRICE_CHANGE_DROP_PCT for c in changes
+    )
 
+
+def pass_reason(token: dict) -> str | None:
+    return pass_1h(token) or pass_vs_1h_high(token)
+
+
+def pass_1h(token: dict) -> str | None:
+    change_1h = token.get("price_change_1h_percent")
     if change_1h is not None and change_1h < PRICE_CHANGE_DROP_PCT:
         return f"pass_1h={change_1h:.1f}%"
+    return None
 
-    if all(c is not None and c < 0 for c in changes) and any(
-        c < PRICE_CHANGE_DROP_PCT for c in changes
-    ):
-        labels = ("1h", "2h", "4h", "8h")
-        passed = ", ".join(
-            f"{label}={change:.1f}%"
-            for label, change in zip(labels, changes)
-            if change < PRICE_CHANGE_DROP_PCT
-        )
-        return f"pass_all_down({passed})"
 
+def pass_vs_1h_high(token: dict) -> str | None:
     vs_high_pct = token.get("price_vs_1h_high_pct")
     if vs_high_pct is not None and vs_high_pct < PRICE_CHANGE_DROP_PCT:
         return f"pass_vs_1h_high={vs_high_pct:.1f}%"

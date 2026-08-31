@@ -137,6 +137,10 @@ def maybe_buy(client: DexClient, coin: dict) -> None:
     if not symbol or not address or address == SOL_ADDRESS:
         return
 
+    if _already_sold(coin):
+        logger.info("skip %s: already sold", symbol)
+        return
+
     buys = get_pending_buy_transactions_by_symbol(symbol)
     if len(buys) >= MAX_BUYS_PER_TOKEN:
         logger.info("skip %s: max buys", symbol)
@@ -233,6 +237,13 @@ def maybe_sell(
 
     logger.info("alert sell %s %s", symbol, reason)
     send_sell_alert(symbol, balance, pnl, reason)
+
+
+def _already_sold(coin: dict) -> bool:
+    sell_time = coin.get("sell_time")
+    if isinstance(sell_time, list):
+        return any(sell_time)
+    return bool(sell_time)
 
 
 def _last_scan(coin: dict) -> dict:

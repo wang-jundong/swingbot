@@ -188,6 +188,7 @@ def _append_scan_metrics(coin: dict, token: dict) -> None:
     rounds[-1].append({
         "liquidity_usd": rounded(token.get("liquidity_usd"), 2),
         "volume_24h_usd": rounded(token.get("volume_24h_usd"), 2),
+        "holders": rounded(token.get("holders"), 0),
         "scan_time": unix_to_str(unix_now()),
         "price": rounded(token.get("price"), 10),
         "filter_reason": token.get("filter_reason"),

@@ -1026,16 +1026,17 @@ PAGE_HTML = """<!DOCTYPE html>
             <td>${esc(s.scan_time || "—")}${si === 0 ? ' <span class="reason">buy</span>' : ""}</td>
             <td>${usd(s.liquidity_usd)}</td>
             <td>${usd(s.volume_24h_usd)}</td>
+            <td>${s.holders == null || s.holders === "" ? "—" : num(s.holders, 0)}</td>
             <td>${s.price == null || s.price === "" ? "—" : tokenPrice(s.price) + " SOL"}</td>
             <td class="reason">${esc(s.filter_reason || "—")}</td>
-          </tr>`).join("") || `<tr><td colspan="5" class="reason">Empty group.</td></tr>`;
+          </tr>`).join("") || `<tr><td colspan="6" class="reason">Empty group.</td></tr>`;
         return `
           <h2>Scans · buy ${gi + 1}</h2>
           <table>
-            <thead><tr><th>Time</th><th>Liquidity</th><th>24h volume</th><th>Price</th><th>Filter</th></tr></thead>
+            <thead><tr><th>Time</th><th>Liquidity</th><th>24h volume</th><th>Holders</th><th>Price</th><th>Filter</th></tr></thead>
             <tbody>${rows}</tbody>
           </table>`;
-      }).join("") : `<h2>Scans</h2><table><tbody><tr><td colspan="5" class="reason">No scans yet.</td></tr></tbody></table>`;
+      }).join("") : `<h2>Scans</h2><table><tbody><tr><td colspan="6" class="reason">No scans yet.</td></tr></tbody></table>`;
       return `
         <h1>${esc(t.symbol)}</h1>
         <div class="meta">${esc(t.name)} · ${esc(t.status)}</div>

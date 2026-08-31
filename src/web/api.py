@@ -140,6 +140,7 @@ def _serialize_scans(value) -> list[list[dict]]:
                 "scan_time": item.get("scan_time"),
                 "liquidity_usd": item.get("liquidity_usd"),
                 "volume_24h_usd": item.get("volume_24h_usd"),
+                "holders": item.get("holders"),
                 "price": item.get("price"),
                 "filter_reason": item.get("filter_reason"),
             })

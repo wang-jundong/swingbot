@@ -18,7 +18,7 @@ from src.backtest.data import (
 from src.config.backtest import CANDLE_INTERVAL_SEC
 from src.storage.coins import get_all_tokens
 from src.utils.number_util import to_float
-from src.utils.time_util import unix_now
+from src.utils.time_util import str_to_unix, unix_now
 from src.web.chart_spec import listing_unix, prepare_candles
 
 _dex_client: DexClient | None | bool = None
@@ -166,6 +166,7 @@ def backtest_ohlcv_payload(address: str) -> dict | None:
         fill for fill in load_wallet_fills()
         if fill.get("address") == mint
     ]
+    buys, sells = _chart_trades(mint, coin)
     candles = prepare_candles(cached.get("candles") or [], now=unix_now())
     return {
         "name": coin.get("name") or "",
@@ -181,8 +182,43 @@ def backtest_ohlcv_payload(address: str) -> dict | None:
         "c": candles["c"],
         "v": candles["v"],
         "fills": fills,
+        "buys": buys,
+        "sells": sells,
         "registered_at": listing_unix(coin),
     }
+
+
+def _chart_trades(mint: str, universe_coin: dict) -> tuple[list[dict], list[dict]]:
+    """Buy/sell unix times for chart markers, from stored coin records."""
+    stored = next(
+        (row for row in get_all_tokens() if row.get("address") == mint),
+        None,
+    ) or universe_coin or {}
+    scans = _serialize_scans(stored.get("scans"))
+    buys = []
+    buy_times = _as_list(stored.get("buy_time")) or _as_list(
+        (universe_coin or {}).get("buy_unix")
+    )
+    for i, value in enumerate(buy_times):
+        ts = value if isinstance(value, (int, float)) else str_to_unix(value)
+        if not ts:
+            continue
+        price = None
+        if i < len(scans) and scans[i]:
+            price = scans[i][0].get("price")
+        buys.append({"time": int(ts), "price": price})
+    sells = []
+    sell_times = _as_list(stored.get("sell_time"))
+    pnls = _as_list(stored.get("pnl"))
+    for i, value in enumerate(sell_times):
+        ts = str_to_unix(value)
+        if not ts:
+            continue
+        sells.append({
+            "time": ts,
+            "pnl": pnls[i] if i < len(pnls) else None,
+        })
+    return buys, sells
 
 
 def refresh_mint_ohlcv(address: str) -> dict | None:

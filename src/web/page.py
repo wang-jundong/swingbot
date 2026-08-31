@@ -415,7 +415,7 @@ PAGE_HTML = """<!DOCTYPE html>
     };
 
     function emptySeries() {
-      return { t: [], o: [], h: [], l: [], c: [], v: [], fills: [], registered_at: null };
+      return { t: [], o: [], h: [], l: [], c: [], v: [], fills: [], buys: [], sells: [], registered_at: null };
     }
     function offsetLabel(hours) {
       if (hours === 0) return "UTC";
@@ -457,50 +457,74 @@ PAGE_HTML = """<!DOCTYPE html>
         color: chart.c[i] >= chart.o[i] ? CHART_VOL_UP : CHART_VOL_DN,
       }));
     }
-    function nearestBarTime(unix) {
-      if (!chart.t.length) return shiftedTime(unix);
-      const target = shiftedTime(unix);
-      let best = shiftedTime(chart.t[0]);
+    function nearestBarIndex(unix) {
+      if (!chart.t.length || unix == null || !Number.isFinite(Number(unix))) return -1;
+      const target = Number(unix);
+      let best = 0;
       let bestD = Infinity;
-      for (const t of chart.t) {
-        const s = shiftedTime(t);
-        const d = Math.abs(s - target);
-        if (d < bestD) { bestD = d; best = s; }
+      for (let i = 0; i < chart.t.length; i++) {
+        const d = Math.abs(chart.t[i] - target);
+        if (d < bestD) { bestD = d; best = i; }
       }
       return best;
     }
     function tradeMarkers() {
-      const byTime = {};
-      (chart.fills || []).forEach((fill) => {
-        if (!fill.block_time || fill.price == null) return;
-        const buy = String(fill.action || "").toLowerCase() === "buy";
-        const time = nearestBarTime(fill.block_time);
-        if (buy) {
-          if (byTime[time] && byTime[time]._buyPrice != null) return;
-          byTime[time] = {
-            time,
-            position: "belowBar",
-            color: CHART_UP,
-            shape: "arrowUp",
-            text: "BUY",
-            id: "buy-" + time,
-            _buyPrice: Number(fill.price),
-          };
+      const grouped = {};
+      const add = (action, unix, price, pnl, enrich) => {
+        if (action !== "buy" && action !== "sell") return;
+        const i = nearestBarIndex(unix);
+        if (i < 0) return;
+        const time = shiftedTime(chart.t[i]);
+        const key = action + ":" + time;
+        const parsedPrice = price == null || price === "" || !Number.isFinite(Number(price)) ? null : Number(price);
+        const parsedPnl = pnl == null || pnl === "" || !Number.isFinite(Number(pnl)) ? null : Number(pnl);
+        const row = grouped[key];
+        if (row) {
+          if (!enrich) row.count += 1;
+          if (parsedPrice != null) row.price = parsedPrice;
+          if (parsedPnl != null) row.pnl = parsedPnl;
           return;
         }
-        if (byTime[time] && byTime[time]._buyPrice != null) return;
-        byTime[time] = {
+        grouped[key] = {
+          action,
           time,
-          position: "aboveBar",
-          color: CHART_DOWN,
-          shape: "arrowDown",
-          text: "SELL",
-          id: "sell-" + time,
-          _sellPrice: Number(fill.price),
-          _pnl: sellFillPnl(fill),
+          count: 1,
+          price: parsedPrice != null ? parsedPrice : (action === "buy" ? chart.l[i] : chart.h[i]),
+          pnl: parsedPnl,
         };
+      };
+      const token = tokens.find(t => t.address === selected) || {};
+      const bookBuys = (chart.buys && chart.buys.length) ? chart.buys : (token.buys || []);
+      const bookSells = (chart.sells && chart.sells.length) ? chart.sells : (token.sells || []);
+      bookBuys.forEach((row) => add("buy", parseTradeTime(row.time != null ? row.time : row), row.price, null, false));
+      bookSells.forEach((row) => add("sell", parseTradeTime(row.time), row.price, row.pnl, false));
+      (chart.fills || []).forEach((fill) => {
+        const action = String(fill.action || "").toLowerCase();
+        add(action, fill.block_time, fill.price, action === "sell" ? sellFillPnl(fill) : null, true);
       });
-      return Object.values(byTime).sort((a, b) => a.time - b.time);
+      return Object.values(grouped).map((row) => {
+        const buy = row.action === "buy";
+        return {
+          time: row.time,
+          position: buy ? "belowBar" : "aboveBar",
+          color: buy ? CHART_UP : CHART_DOWN,
+          shape: buy ? "arrowUp" : "arrowDown",
+          text: (buy ? "BUY" : "SELL") + (row.count > 1 ? "×" + row.count : ""),
+          size: 2,
+          id: row.action + "-" + row.time,
+          _buyPrice: buy ? row.price : null,
+          _sellPrice: buy ? null : row.price,
+          _pnl: buy ? null : row.pnl,
+        };
+      }).sort((a, b) => a.time - b.time);
+    }
+    function parseTradeTime(value) {
+      if (value == null || value === "") return null;
+      if (typeof value === "number" && Number.isFinite(value)) return value;
+      const n = Number(value);
+      if (Number.isFinite(n) && String(value).trim() !== "" && !String(value).includes("-") && n > 1e9) return n;
+      const stamp = Date.parse(String(value).replace(" ", "T") + "+10:00");
+      return Number.isNaN(stamp) ? null : stamp / 1000;
     }
     function sellFillPnl(fill) {
       const token = tokens.find(t => t.address === selected);
@@ -645,7 +669,7 @@ PAGE_HTML = """<!DOCTYPE html>
       candleSeries.setData(candleData());
       volumeSeries.setData(volumeData());
       const markers = tradeMarkers();
-      if (markers.length) candleSeries.setMarkers(markers);
+      candleSeries.setMarkers(markers);
       tvChart.timeScale().fitContent();
       tvChart.subscribeCrosshairMove((param) => {
         const hud = $("ohlcHud");
@@ -677,7 +701,8 @@ PAGE_HTML = """<!DOCTYPE html>
     function applyChartData(data) {
       chart = {
         t: data.t || [], o: data.o || [], h: data.h || [], l: data.l || [], c: data.c || [],
-        v: data.v || [], fills: data.fills || [], registered_at: data.registered_at,
+        v: data.v || [], fills: data.fills || [], buys: data.buys || [], sells: data.sells || [],
+        registered_at: data.registered_at,
       };
       if (!chart.t.length) {
         destroyChart();

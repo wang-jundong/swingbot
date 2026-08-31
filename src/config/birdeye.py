@@ -4,7 +4,6 @@ BIRDEYE_TOKEN_LIST_URL = "https://public-api.birdeye.so/defi/v3/token/list"
 BIRDEYE_PRICE_STATS_URL = "https://public-api.birdeye.so/defi/v3/price/stats/single"
 
 LIQUIDITY_USD_MIN = 10_000
-LIQUIDITY_USD_MAX = 100_000
 VOLUME_24H_USD_MIN = 50_000
 VOLUME_1H_CHANGE_PCT_MIN = 0
 PAIR_AGE_DAYS_MIN = 1

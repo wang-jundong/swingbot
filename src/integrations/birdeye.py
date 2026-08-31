@@ -13,7 +13,6 @@ from src.config.bindings.paths import BIRDEYE_PATH
 from src.config.birdeye import (
     BIRDEYE_PRICE_STATS_URL,
     BIRDEYE_TOKEN_LIST_URL,
-    LIQUIDITY_USD_MAX,
     LIQUIDITY_USD_MIN,
     MAX_PAGES,
     PAGE_LIMIT,
@@ -121,7 +120,6 @@ def fetch_token_list() -> list[dict]:
         "sort_type": "desc",
         "limit": PAGE_LIMIT,
         "min_liquidity": LIQUIDITY_USD_MIN,
-        "max_liquidity": LIQUIDITY_USD_MAX,
         "min_recent_listing_time": now - PAIR_AGE_DAYS_MAX * SECONDS_PER_DAY,
         "max_recent_listing_time": now - PAIR_AGE_DAYS_MIN * SECONDS_PER_DAY,
         "min_trade_24h_count": TXNS_H24_MIN,

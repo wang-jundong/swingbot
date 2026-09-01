@@ -4,7 +4,8 @@ import json
 from pathlib import Path
 from typing import Optional
 
-from src.config.bindings.paths import TRADE_STATS_PATH
+from src.config.bindings.paths import TRADE_STATS_PATHS
+from src.storage.settings import get_key_id
 from src.utils.log_util import get_dex_logger
 from src.utils.number_util import format_decimal
 
@@ -21,6 +22,13 @@ def resolve_sell_reason(symbol: str, reason: str | None = None) -> str:
     if resolved in (REASON_TARGET, REASON_HOLD, REASON_MANUAL):
         return resolved
     return REASON_MANUAL
+
+
+def _stats_path(filepath: Optional[Path | str] = None) -> Path:
+    if filepath:
+        return Path(filepath)
+    key_id = get_key_id()
+    return Path(TRADE_STATS_PATHS.get(key_id, TRADE_STATS_PATHS["solana"]))
 
 
 def _new_stats() -> dict[str, float | int]:
@@ -55,7 +63,7 @@ def load_trade_stats(
     filepath: Optional[Path | str] = None,
 ) -> dict[str, float | int]:
     """Load flat target/hold/manual trade stats."""
-    path = Path(filepath or TRADE_STATS_PATH)
+    path = _stats_path(filepath)
     if not path.exists():
         return _new_stats()
     try:
@@ -77,7 +85,7 @@ def save_trade_stats(
     filepath: Optional[Path | str] = None,
 ) -> None:
     """Save stats JSON."""
-    path = Path(filepath or TRADE_STATS_PATH)
+    path = _stats_path(filepath)
     path.parent.mkdir(parents=True, exist_ok=True)
     output = {
         "target_sell_count": str(int(data["target_sell_count"])),
@@ -99,7 +107,7 @@ def record_trade_stat(
     filepath: Optional[Path | str] = None,
 ) -> dict[str, float | int]:
     """Add one max sell to target, hold, or manual stats."""
-    path = Path(filepath or TRADE_STATS_PATH)
+    path = _stats_path(filepath)
     stats = load_trade_stats(path)
     pnl = float(pnl)
     reason = str(reason or "").strip().lower()

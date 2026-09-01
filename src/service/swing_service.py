@@ -12,6 +12,7 @@ from src.config.trading import (
     SWING_INTERVAL_SEC,
     SWING_SELL_AMOUNT,
 )
+from src.dex.dual_mode import execute_dual_mode_trade
 from src.dex.history.transaction import (
     get_pending_buy_transactions_by_symbol,
     get_pending_transactions,
@@ -165,7 +166,9 @@ def maybe_buy(client: DexClient, coin: dict) -> None:
         logger.warning("skip %s: low SOL", symbol)
         return
 
-    tx_hash, success, balance_before, balance_after = client.buy(symbol, SWING_BUY_AMOUNT)
+    tx_hash, success, balance_before, balance_after = execute_dual_mode_trade(
+        "buy", client.buy, symbol, SWING_BUY_AMOUNT
+    )
     if success and tx_hash:
         logger.info("buy %s %s %s", symbol, SWING_BUY_AMOUNT, tx_hash)
         send_buy(symbol, SWING_BUY_AMOUNT, tx_hash, success, balance_before, balance_after)
@@ -222,8 +225,8 @@ def maybe_sell(
 
     reason = "hold" if hold_expired else "target"
     if is_swing_auto_sell_enabled():
-        tx_hash, success, pnl, balance_before, balance_after = client.sell(
-            symbol, SWING_SELL_AMOUNT, reason=reason,
+        tx_hash, success, pnl, balance_before, balance_after = execute_dual_mode_trade(
+            "sell", client.sell, symbol, SWING_SELL_AMOUNT, reason=reason,
         )
         if success and tx_hash:
             logger.info("sell %s %s pnl=%s %s", symbol, reason, format_decimal(pnl), tx_hash)

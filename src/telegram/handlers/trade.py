@@ -11,8 +11,9 @@ from src.config.telegram import (
     SELL_ACTION,
     SELL_AMOUNT_ACTION,
 )
-from src.telegram.common import dex_available, get_dex_client, parse_callback
+from src.dex.dual_mode import execute_dual_mode_trade
 from src.dex.history.trade_stats import REASON_MANUAL
+from src.telegram.common import dex_available, get_dex_client, parse_callback
 from src.telegram.ui.formatters import (
     build_trade_select_message,
     format_buy_result,
@@ -88,7 +89,7 @@ async def on_buy_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     client = get_dex_client(context)
     try:
         tx_hash, success, balance_before, balance_after = await asyncio.to_thread(
-            client.buy, symbol, amount
+            execute_dual_mode_trade, "buy", client.buy, symbol, amount
         )
         if tx_hash:
             await query.edit_message_text(
@@ -152,7 +153,12 @@ async def on_sell_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     reason = REASON_MANUAL
     try:
         tx_hash, success, pnl, balance_before, balance_after = await asyncio.to_thread(
-            client.sell, symbol, amount_label, reason=reason
+            execute_dual_mode_trade,
+            "sell",
+            client.sell,
+            symbol,
+            amount_label,
+            reason=reason,
         )
         if tx_hash:
             await query.edit_message_text(

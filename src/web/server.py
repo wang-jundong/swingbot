@@ -7,13 +7,7 @@ from urllib.parse import parse_qs, urlparse
 
 from src.config.web import WEB_HOST, WEB_PORT
 from src.utils.log_util import log_formatter
-from src.web.api import (
-    backtest_ohlcv_payload,
-    candle_refresh_status,
-    refresh_mint_ohlcv,
-    start_candle_refresh,
-    tokens_payload,
-)
+from src.web.api import tokens_payload
 from src.web.page import PAGE_HTML
 
 
@@ -46,71 +40,12 @@ class TokenDashboardHandler(BaseHTTPRequestHandler):
                 return
             self._send(200, "application/json; charset=utf-8", body, cache=False)
             return
-        if path == "/api/backtest/ohlcv":
-            address = (parse_qs(urlparse(self.path).query).get("address") or [""])[0]
-            try:
-                payload = backtest_ohlcv_payload(address)
-            except Exception:
-                logger.exception("failed to load ohlcv")
-                self._send(500, "application/json", b'{"error":"failed to load ohlcv"}')
-                return
-            if payload is None:
-                self._send(404, "application/json", b'{"error":"ohlcv not found"}')
-                return
-            self._send(
-                200,
-                "application/json; charset=utf-8",
-                json.dumps(payload).encode("utf-8"),
-                cache=False,
-            )
-            return
-        if path == "/api/backtest/refresh":
-            self._send(
-                200,
-                "application/json; charset=utf-8",
-                json.dumps(candle_refresh_status()).encode("utf-8"),
-                cache=False,
-            )
-            return
         self._send(404, "text/plain; charset=utf-8", b"not found")
 
     def do_POST(self) -> None:
         length = int(self.headers.get("Content-Length") or 0)
         if length:
             self.rfile.read(length)
-        path = urlparse(self.path).path
-        if path == "/api/backtest/ohlcv":
-            address = (parse_qs(urlparse(self.path).query).get("address") or [""])[0]
-            try:
-                payload = refresh_mint_ohlcv(address)
-            except Exception:
-                logger.exception("failed to refresh ohlcv")
-                self._send(500, "application/json", b'{"error":"failed to refresh ohlcv"}')
-                return
-            if payload is None:
-                self._send(404, "application/json", b'{"error":"ohlcv not found"}')
-                return
-            self._send(
-                200,
-                "application/json; charset=utf-8",
-                json.dumps(payload).encode("utf-8"),
-                cache=False,
-            )
-            return
-        if path == "/api/backtest/refresh":
-            try:
-                payload = start_candle_refresh()
-            except Exception:
-                logger.exception("failed to start candle refresh")
-                self._send(500, "application/json", b'{"error":"failed to start refresh"}')
-                return
-            self._send(
-                200,
-                "application/json; charset=utf-8",
-                json.dumps(payload).encode("utf-8"),
-                cache=False,
-            )
-            return
         self._send(404, "text/plain; charset=utf-8", b"not found")
 
     def log_message(self, format: str, *args) -> None:

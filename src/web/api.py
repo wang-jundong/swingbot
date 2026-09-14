@@ -1,25 +1,14 @@
 """JSON payloads for the token dashboard."""
 
-import threading
-
 from src.dex.history.daily_pnl import date_key, load_daily_pnl
 from src.dex.history.trade_stats import get_trade_stats
 from src.dex.history.transaction import get_pending_transactions, pnl_native
 from src.dex.solana.client import DexClient
 from src.dex.solana.common.spl import get_owner_token_balances
 from src.dex.solana.jupiter.markets import fetch_token_markets
-from src.backtest.data import (
-    fetch_all,
-    fetch_mint,
-    load_cached_ohlcv,
-    load_universe,
-    load_wallet_fills,
-)
-from src.config.backtest import CANDLE_INTERVAL_SEC
 from src.storage.coins import get_all_tokens
 from src.utils.number_util import to_float
-from src.utils.time_util import str_to_unix, unix_now
-from src.web.chart_spec import listing_unix, prepare_candles
+
 
 _dex_client: DexClient | None | bool = None
 
@@ -149,88 +138,6 @@ def _serialize_scans(value) -> list[list[dict]]:
     return rounds
 
 
-def backtest_ohlcv_payload(address: str) -> dict | None:
-    """Full 5m candles and wallet fills for one mint."""
-    mint = (address or "").strip()
-    if not mint or len(mint) > 64 or not mint.isalnum():
-        return None
-    cached = load_cached_ohlcv(mint)
-    if not cached:
-        return None
-    universe = {
-        coin.get("address"): coin
-        for coin in load_universe()
-        if coin.get("address")
-    }
-    coin = universe.get(mint) or {}
-    fills = [
-        fill for fill in load_wallet_fills()
-        if fill.get("address") == mint
-    ]
-    buys, sells = _chart_trades(mint, coin)
-    candles = prepare_candles(cached.get("candles") or [], now=unix_now())
-    return {
-        "name": coin.get("name") or "",
-        "symbol": coin.get("symbol") or "",
-        "address": mint,
-        "buy_time": _as_list(coin.get("buy_time")),
-        "market": cached.get("market") or coin.get("market"),
-        "interval_sec": cached.get("interval_sec") or CANDLE_INTERVAL_SEC,
-        "t": candles["t"],
-        "o": candles["o"],
-        "h": candles["h"],
-        "l": candles["l"],
-        "c": candles["c"],
-        "v": candles["v"],
-        "fills": fills,
-        "buys": buys,
-        "sells": sells,
-        "registered_at": listing_unix(coin),
-    }
-
-
-def _chart_trades(mint: str, universe_coin: dict) -> tuple[list[dict], list[dict]]:
-    """Buy/sell unix times for chart markers, from stored coin records."""
-    stored = next(
-        (row for row in get_all_tokens() if row.get("address") == mint),
-        None,
-    ) or universe_coin or {}
-    scans = _serialize_scans(stored.get("scans"))
-    buys = []
-    buy_times = _as_list(stored.get("buy_time")) or _as_list(
-        (universe_coin or {}).get("buy_unix")
-    )
-    for i, value in enumerate(buy_times):
-        ts = value if isinstance(value, (int, float)) else str_to_unix(value)
-        if not ts:
-            continue
-        price = None
-        if i < len(scans) and scans[i]:
-            price = scans[i][0].get("price")
-        buys.append({"time": int(ts), "price": price})
-    sells = []
-    sell_times = _as_list(stored.get("sell_time"))
-    pnls = _as_list(stored.get("pnl"))
-    for i, value in enumerate(sell_times):
-        ts = str_to_unix(value)
-        if not ts:
-            continue
-        sells.append({
-            "time": ts,
-            "pnl": pnls[i] if i < len(pnls) else None,
-        })
-    return buys, sells
-
-
-def refresh_mint_ohlcv(address: str) -> dict | None:
-    """Fetch latest 5m candles for one mint, then return the chart payload."""
-    mint = (address or "").strip()
-    if not mint or len(mint) > 64 or not mint.isalnum():
-        return None
-    fetch_mint(mint)
-    return backtest_ohlcv_payload(mint)
-
-
 def tokens_payload(*, live: bool = False) -> dict:
     pending = get_pending_transactions()
     pending_symbols = {str(symbol).strip() for symbol in pending}
@@ -315,65 +222,3 @@ def _attach_net_pnls(tokens: list[dict], pending: dict) -> None:
         balance = None if balances is None or not mint else balances.get(mint, 0.0)
         value = pnl_native(price, balance, row["net_cost"])
         token["net_pnl"] = None if value is None else round(value, 6)
-
-
-_refresh_lock = threading.Lock()
-_refresh = {
-    "running": False,
-    "done": 0,
-    "total": 0,
-    "symbol": "",
-    "address": "",
-    "message": "",
-    "error": None,
-    "summary": None,
-}
-
-
-def candle_refresh_status() -> dict:
-    with _refresh_lock:
-        return dict(_refresh)
-
-
-def start_candle_refresh() -> dict:
-    with _refresh_lock:
-        if _refresh["running"]:
-            return {"started": False, **dict(_refresh)}
-        _refresh.update({
-            "running": True,
-            "done": 0,
-            "total": 0,
-            "symbol": "",
-            "address": "",
-            "message": "Updating wallet fills…",
-            "error": None,
-            "summary": None,
-        })
-    threading.Thread(target=_run_candle_refresh, daemon=True).start()
-    return {"started": True, **candle_refresh_status()}
-
-
-def _run_candle_refresh() -> None:
-    def on_progress(done: int, total: int, row: dict) -> None:
-        with _refresh_lock:
-            _refresh["done"] = done
-            _refresh["total"] = total
-            _refresh["symbol"] = str(row.get("symbol") or "")
-            _refresh["address"] = str(row.get("address") or "")
-            _refresh["message"] = str(row.get("error") or "ok")
-
-    try:
-        summary = fetch_all(on_progress=on_progress, refresh_fills=True)
-        with _refresh_lock:
-            _refresh["summary"] = summary
-            _refresh["message"] = "done"
-            _refresh["done"] = int(summary.get("tokens") or _refresh["done"])
-            _refresh["total"] = int(summary.get("tokens") or _refresh["total"])
-    except Exception as exc:
-        with _refresh_lock:
-            _refresh["error"] = str(exc)
-            _refresh["message"] = "failed"
-    finally:
-        with _refresh_lock:
-            _refresh["running"] = False
-

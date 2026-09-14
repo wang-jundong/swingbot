@@ -3,12 +3,18 @@
 import json
 import logging
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from src.config.web import WEB_HOST, WEB_PORT
 from src.utils.log_util import log_formatter
-from src.web.api import tokens_payload
-from src.web.page import PAGE_HTML
+from src.web.api import ohlc_curve_payload, ohlc_tokens_payload
+from src.web.page import page_html
+
+_STATIC = Path(__file__).resolve().parent / "static"
+_STATIC_FILES = {
+    "/static/lightweight-charts.js": ("text/javascript; charset=utf-8", "lightweight-charts.js"),
+}
 
 
 def _logger() -> logging.Logger:
@@ -24,21 +30,62 @@ def _logger() -> logging.Logger:
 logger = _logger()
 
 
+def _query_int(query: dict, key: str) -> int | None:
+    raw = (query.get(key) or [""])[0]
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
 class TokenDashboardHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         path = urlparse(self.path).path
         if path in ("/", "/index.html"):
-            self._send(200, "text/html; charset=utf-8", PAGE_HTML.encode("utf-8"))
+            self._send(200, "text/html; charset=utf-8", page_html().encode("utf-8"))
             return
-        if path == "/api/tokens":
-            live = parse_qs(urlparse(self.path).query).get("live", ["0"])[0] == "1"
+        static = _STATIC_FILES.get(path)
+        if static:
+            content_type, name = static
+            file_path = _STATIC / name
+            if file_path.is_file():
+                self._send(200, content_type, file_path.read_bytes())
+                return
+        if path == "/api/ohlc/tokens":
+            query = parse_qs(urlparse(self.path).query)
+            raw_wallet = (query.get("wallet") or [None])[0]
+            scoped = "wallet" not in query or (raw_wallet not in (None, "", "all"))
+            wallet = None if raw_wallet in (None, "", "all") else raw_wallet
             try:
-                body = json.dumps(tokens_payload(live=live)).encode("utf-8")
+                body = json.dumps(ohlc_tokens_payload(wallet, scoped=scoped)).encode("utf-8")
             except Exception:
-                logger.exception("failed to load tokens")
-                self._send(500, "application/json", b'{"error":"failed to load tokens"}')
+                logger.exception("failed to load ohlc tokens")
+                self._send(500, "application/json", b'{"error":"failed to load ohlc tokens"}')
                 return
             self._send(200, "application/json; charset=utf-8", body, cache=False)
+            return
+        if path == "/api/ohlc/curve":
+            query = parse_qs(urlparse(self.path).query)
+            address = (query.get("address") or [""])[0]
+            wallet = (query.get("wallet") or [None])[0]
+            interval = (query.get("interval") or ["1m"])[0]
+            time_from = _query_int(query, "from")
+            time_to = _query_int(query, "to")
+            try:
+                payload = ohlc_curve_payload(address, wallet, interval, time_from, time_to)
+            except Exception:
+                logger.exception("failed to load ohlc curve")
+                self._send(500, "application/json", b'{"error":"failed to load ohlc curve"}')
+                return
+            if payload is None:
+                self._send(404, "application/json; charset=utf-8", b'{"error":"ohlc not found"}')
+                return
+            self._send(
+                200,
+                "application/json; charset=utf-8",
+                json.dumps(payload).encode("utf-8"),
+                cache=False,
+            )
             return
         self._send(404, "text/plain; charset=utf-8", b"not found")
 

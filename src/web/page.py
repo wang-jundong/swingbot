@@ -1,11 +1,16 @@
-"""Embedded token dashboard HTML."""
+"""Embedded OHLC curve dashboard HTML."""
 
-PAGE_HTML = """<!DOCTYPE html>
+import json
+
+from src.config.structure import as_dict as structure_params
+from src.config.telegram import LOCAL_TIMEZONE
+
+_PAGE_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Swingbot tokens</title>
+  <title>Swingbot curves</title>
   <style>
     :root {
       --bg: #0b0d11;
@@ -136,7 +141,7 @@ PAGE_HTML = """<!DOCTYPE html>
     .tokens::-webkit-scrollbar-thumb:hover, .detail::-webkit-scrollbar-thumb:hover { background: var(--muted); }
     .row {
       display: grid;
-      grid-template-columns: 10px 1fr auto;
+      grid-template-columns: 10px 1fr;
       gap: 10px;
       padding: 10px 14px;
       border-bottom: 1px solid var(--line);
@@ -148,10 +153,7 @@ PAGE_HTML = """<!DOCTYPE html>
     .dot.open { background: var(--green); }
     .dot.sold { background: var(--gold); }
     .sym { font-weight: 650; }
-    .name { color: var(--muted); font-size: 12px; }
     .metrics { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; margin-top: 2px; }
-    .row-pnl { font-variant-numeric: tabular-nums; font-size: 12px; text-align: right; }
-    .row-hold { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; margin-top: 2px; text-align: right; }
     .detail { padding: 24px 28px 40px; }
     .empty { color: var(--muted); padding: 24px; }
     h1 { margin: 0 0 6px; font-size: 28px; }
@@ -174,6 +176,9 @@ PAGE_HTML = """<!DOCTYPE html>
       cursor: pointer;
       font: inherit;
     }
+    .chip.on { border-color: var(--gold); color: var(--gold); }
+    .chart-bias { color: var(--muted); font-size: 12px; }
+    .chart-bias b { font-weight: 650; text-transform: capitalize; }
     .cards {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -188,12 +193,69 @@ PAGE_HTML = """<!DOCTYPE html>
     }
     .card span { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px; }
     .card b { font-variant-numeric: tabular-nums; font-size: 18px; }
-    h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin: 28px 0 10px; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
-    th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; }
-    td { font-variant-numeric: tabular-nums; }
-    .reason { color: var(--muted); font-size: 12px; }
+    .chart-panel { margin: 8px 0 24px; }
+    .chart-toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+    .chart-toolbar select { width: auto; min-width: 92px; }
+    .chart-params { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-bottom: 8px; }
+    .chart-param {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      color: var(--muted);
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .chart-param input {
+      width: 64px;
+      height: 32px;
+      min-width: 0;
+      padding: 6px 8px;
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+    }
+    .chart-param-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 10px;
+      align-items: center;
+      padding: 8px 12px;
+      min-height: 48px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel-2);
+    }
+    .chart-ohlc {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      color: var(--muted);
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+      min-height: 18px;
+      margin-top: 8px;
+    }
+    .chart-ohlc b { color: var(--text); font-weight: 600; }
+    .chart-ohlc .up b { color: var(--green); }
+    .chart-ohlc .down b { color: var(--red); }
+    .chart-stage {
+      position: relative;
+      height: min(62vh, 640px);
+      min-height: 420px;
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .chart-empty {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+    }
+    .mint { font-family: ui-monospace, "Cascadia Mono", monospace; font-size: 13px; }
     @media (max-width: 840px) {
       main { grid-template-columns: 1fr; grid-template-rows: 42vh 1fr; }
       .list { border-right: 0; border-bottom: 1px solid var(--line); }
@@ -212,28 +274,14 @@ PAGE_HTML = """<!DOCTYPE html>
     <main>
       <aside class="list">
         <div class="filters">
-          <input id="q" placeholder="Search symbol, name, or address">
-          <div class="pills">
-            <button data-status="all" class="on">All</button>
-            <button data-status="open">Open</button>
-            <button data-status="sold">Sold</button>
-          </div>
+          <input id="q" placeholder="Search mint or wallet">
+          <select id="wallet"></select>
           <select id="sort">
-            <option value="buy-desc">Latest buy</option>
-            <option value="buy-asc">Earliest buy</option>
-            <option value="symbol">Symbol</option>
-            <option value="pnl-desc">PnL high → low</option>
-            <option value="pnl-asc">PnL low → high</option>
-            <option value="liq-desc">Liquidity high → low</option>
-            <option value="liq-asc">Liquidity low → high</option>
-            <option value="vol-desc">Volume high → low</option>
-            <option value="vol-asc">Volume low → high</option>
-            <option value="txn-desc">Txns high → low</option>
-            <option value="txn-asc">Txns low → high</option>
+            <option value="latest">Latest candle</option>
+            <option value="change-desc">Change high → low</option>
+            <option value="change-asc">Change low → high</option>
             <option value="age-desc">Age high → low</option>
             <option value="age-asc">Age low → high</option>
-            <option value="scan-desc">Scans high → low</option>
-            <option value="scan-asc">Scans low → high</option>
           </select>
         </div>
         <div class="tokens" id="list"></div>
@@ -245,38 +293,57 @@ PAGE_HTML = """<!DOCTYPE html>
     <div class="spin"></div>
     <div id="overlayText">Loading...</div>
   </div>
+  <script src="/static/lightweight-charts.js"></script>
   <script>
     const DEX = "https://dexscreener.com/solana/";
     const GMGN = "https://gmgn.ai/sol/token/";
     const SOL = "https://solscan.io/token/";
+    const params = new URLSearchParams(location.search);
     let tokens = [];
-    let selected = new URLSearchParams(location.search).get("address");
-    let statusFilter = "all";
+    let selected = params.get("address");
+    let chartInterval = ["15s","30s","1m","5m","15m"].includes(params.get("interval")) ? params.get("interval") : "1m";
+    let chartWallet = params.has("wallet") ? (params.get("wallet") || "") : null;
+    let chartData = null;
+    let overviewData = null;
+    let chartAbort = null;
+    let detailAbort = null;
+    let tvChart = null;
+    let candleSeries = null;
+    let lineSeries = null;
+    let swingSeries = null;
+    let volumeSeries = null;
+    let showPivots = true;
+    let showSwingLine = true;
+    let showKama = true;
+    let ignoreRange = false;
+    let rangeTimer = null;
     let loading = false;
+    const INTERVALS = ["15s", "30s", "1m", "5m", "15m"];
+    const STRUCTURE_DEFAULTS = __STRUCTURE_CONFIG__;
+    const LOCAL_TZ = __LOCAL_TIMEZONE__;
+    const PIVOT_LEFT = STRUCTURE_DEFAULTS.PIVOT_LEFT;
+    const PIVOT_RIGHT = STRUCTURE_DEFAULTS.PIVOT_RIGHT;
+    let ATR_PERIOD = STRUCTURE_DEFAULTS.ATR_PERIOD;
+    let ATR_MULT = STRUCTURE_DEFAULTS.ATR_MULT;
+    let ATR_MIN_PCT = STRUCTURE_DEFAULTS.ATR_MIN_PCT;
+    let MIN_PRICE_DISTANCE = STRUCTURE_DEFAULTS.MIN_PRICE_DISTANCE;
+    let MIN_BAR_DISTANCE = STRUCTURE_DEFAULTS.MIN_BAR_DISTANCE;
+    let KAMA_PERIOD = STRUCTURE_DEFAULTS.KAMA_PERIOD;
+    let KAMA_FAST = STRUCTURE_DEFAULTS.KAMA_FAST;
+    let KAMA_SLOW = STRUCTURE_DEFAULTS.KAMA_SLOW;
+    let KAMA_SLOPE = STRUCTURE_DEFAULTS.KAMA_SLOPE;
+    let KAMA_FLAT_ATR = STRUCTURE_DEFAULTS.KAMA_FLAT_ATR;
 
     const $ = (id) => document.getElementById(id);
     const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({
       "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
     }[c]));
-    const cls = (n) => n == null ? "" : Number(n) >= 0 ? "pos" : "neg";
     const num = (n, d = 4) => n == null || n === "" ? "—" : Number(n).toLocaleString(undefined, {
       minimumFractionDigits: 0, maximumFractionDigits: d
     });
-    const usdCompact = (n) => {
-      if (n == null || n === "") return "—";
-      const x = Number(n);
-      if (Math.abs(x) >= 1e6) return "$" + (x / 1e6).toFixed(1) + "M";
-      if (Math.abs(x) >= 1000) return "$" + (x / 1000).toFixed(1) + "k";
-      return "$" + x.toFixed(0);
-    };
     const usd = (n) => n == null || n === "" ? "—" : "$" + Number(n).toLocaleString(undefined, {
       maximumFractionDigits: Number(n) >= 1000 ? 0 : 2
     });
-    const pnl = (n) => {
-      if (n == null || n === "") return "—";
-      const x = Number(n);
-      return (x > 0 ? "+" : "") + x.toFixed(4);
-    };
     const age = (n) => {
       if (n == null || n === "") return "—";
       const hours = Math.max(0, Math.round(Number(n) * 24));
@@ -290,27 +357,55 @@ PAGE_HTML = """<!DOCTYPE html>
       if (Math.abs(x) >= 1) return x.toFixed(4);
       return x.toPrecision(4);
     };
-    const holdAge = (buyTime) => {
-      if (!buyTime) return "—";
-      const bought = Date.parse(String(buyTime).replace(" ", "T") + "+10:00");
-      if (Number.isNaN(bought)) return "—";
-      return age((Date.now() - bought) / 86400000);
+    const shortMint = (a) => !a ? "—" : a.slice(0, 4) + "…" + a.slice(-4);
+    const ageSec = (s) => (s == null || s === "") ? "—" : age(Number(s) / 86400);
+    const when = (unix) => {
+      if (unix == null || unix === "") return "—";
+      return new Date(Number(unix) * 1000).toLocaleString("en-US", { timeZone: LOCAL_TZ });
     };
 
+    function chartTime(unix) {
+      const t = typeof unix === "object" && unix != null ? (unix.timestamp ?? unix) : unix;
+      return new Date(Number(t) * 1000);
+    }
+
+    function chartTick(time, tickMarkType) {
+      const d = chartTime(time);
+      const opts = { timeZone: LOCAL_TZ };
+      if (tickMarkType === 0) return d.toLocaleString("en-US", { ...opts, year: "numeric" });
+      if (tickMarkType === 1) return d.toLocaleString("en-US", { ...opts, month: "short", year: "numeric" });
+      if (tickMarkType === 2) return d.toLocaleString("en-US", { ...opts, month: "short", day: "numeric" });
+      if (tickMarkType === 4) {
+        return d.toLocaleString("en-US", {
+          ...opts, hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+        });
+      }
+      return d.toLocaleString("en-US", { ...opts, hour: "2-digit", minute: "2-digit", hour12: false });
+    }
+
     function syncUrl() {
-      if (!selected) return;
       const url = new URL(location.href);
-      url.searchParams.set("address", selected);
+      url.searchParams.delete("view");
+      if (selected) url.searchParams.set("address", selected);
+      else url.searchParams.delete("address");
+      url.searchParams.delete("range");
+      url.searchParams.delete("mode");
+      url.searchParams.set("interval", chartInterval);
+      if (chartWallet) url.searchParams.set("wallet", chartWallet);
+      else url.searchParams.delete("wallet");
       history.replaceState(null, "", url);
     }
 
     function showDetail() {
       const token = tokens.find(t => t.address === selected);
+      destroyChart();
       if (!token) {
         $("detail").innerHTML = `<div class="empty">Select a token.</div>`;
         return;
       }
       $("detail").innerHTML = detail(token);
+      bindChartControls();
+      loadCurve(token);
     }
 
     function setOverlay(text) {
@@ -323,12 +418,14 @@ PAGE_HTML = """<!DOCTYPE html>
       if (loading) return;
       loading = true;
       const first = !tokens.length;
-      if (first) setOverlay("Loading...");
+      if (first) setOverlay("Loading curves...");
       $("refresh").disabled = true;
       try {
-        const res = await fetch("/api/tokens?live=1", { cache: "no-store" });
+        const qs = chartWallet == null ? "" : ("?wallet=" + encodeURIComponent(chartWallet || "all"));
+        const res = await fetch("/api/ohlc/tokens" + qs, { cache: "no-store" });
         const data = await res.json();
         tokens = data.tokens || [];
+        fillWallets(data.wallets || [], data.wallet);
         renderStats(data.summary || {});
         if (selected && !tokens.some(t => t.address === selected)) selected = null;
         if (!selected && tokens.length) selected = tokens[0].address;
@@ -342,51 +439,20 @@ PAGE_HTML = """<!DOCTYPE html>
       }
     }
 
-    function sumPnl(values) {
-      let total = 0;
-      let any = false;
-      for (const value of values) {
-        if (value == null || value === "") continue;
-        total += Number(value);
-        any = true;
-      }
-      return any ? total : null;
+    function fillWallets(wallets, fallback) {
+      if (chartWallet == null) chartWallet = fallback || "";
+      const opts = [`<option value="">All wallets</option>`]
+        .concat(wallets.map(w => `<option value="${esc(w)}">${esc(shortMint(w))}</option>`));
+      $("wallet").innerHTML = opts.join("");
+      $("wallet").value = wallets.includes(chartWallet) ? chartWallet : "";
+      if (!wallets.includes(chartWallet)) chartWallet = "";
     }
 
     function renderStats(s) {
-      const today = s.today || new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Vladivostok" });
-      const daily = (s.daily_pnl || {})[today];
-      const net = sumPnl(tokens.map(t => t.net_pnl));
-      const realized = s.realized_pnl;
-      const total = realized == null && net == null ? null : Number(realized || 0) + Number(net || 0);
       $("stats").innerHTML = [
+        ["Wallets", s.wallet_count ?? 0],
         ["Tokens", s.token_count ?? 0],
-        ["Open", s.open_count ?? 0],
-        ["Sold", s.sold_count ?? 0],
-        ["PnL", pnl(realized), cls(realized)],
-        ["Net PnL", pnl(net), cls(net)],
-        ["Total PnL", pnl(total), cls(total)],
-        ["Today", pnl(daily), cls(daily)],
-      ].map(([k, v, c]) => `<div class="stat"><b class="${c || ""}">${esc(v)}</b><span>${k}</span></div>`).join("");
-    }
-
-    function hasSold(t) {
-      return t.status === "sold" || (t.sell_count || 0) > 0;
-    }
-
-    function rowPnl(t) {
-      if (statusFilter === "sold" || t.status === "sold") return t.total_pnl;
-      return t.net_pnl;
-    }
-
-    function rowAge(t) {
-      return t.pair_age ?? t.last_pair_age;
-    }
-
-    function rowScanTotal(t) {
-      if (t.scan_total != null && t.scan_total !== "") return Number(t.scan_total);
-      const counts = t.scan_count || [];
-      return counts.length ? counts.reduce((sum, n) => sum + (Number(n) || 0), 0) : null;
+      ].map(([k, v]) => `<div class="stat"><b>${esc(v)}</b><span>${k}</span></div>`).join("");
     }
 
     function cmpNum(a, b, desc) {
@@ -399,140 +465,666 @@ PAGE_HTML = """<!DOCTYPE html>
     function visible() {
       const q = $("q").value.trim().toLowerCase();
       const rows = tokens.filter(t => {
-        if (statusFilter === "open" && t.status !== "open") return false;
-        if (statusFilter === "sold" && !hasSold(t)) return false;
         if (!q) return true;
-        return [t.symbol, t.name, t.address].some(v => String(v || "").toLowerCase().includes(q));
+        return [t.address, t.wallet, ...(t.wallets || [])].some(v => String(v || "").toLowerCase().includes(q));
       });
       const sort = $("sort").value;
       rows.sort((a, b) => {
-        if (sort === "symbol") return String(a.symbol || "").localeCompare(String(b.symbol || ""));
-        if (sort === "buy-asc") return String(a.last_buy_time || "").localeCompare(String(b.last_buy_time || ""));
-        if (sort === "pnl-desc") return cmpNum(rowPnl(a), rowPnl(b), true);
-        if (sort === "pnl-asc") return cmpNum(rowPnl(a), rowPnl(b), false);
-        if (sort === "liq-desc") return cmpNum(a.liquidity, b.liquidity, true);
-        if (sort === "liq-asc") return cmpNum(a.liquidity, b.liquidity, false);
-        if (sort === "vol-desc") return cmpNum(a.volume_24h, b.volume_24h, true);
-        if (sort === "vol-asc") return cmpNum(a.volume_24h, b.volume_24h, false);
-        if (sort === "txn-desc") return cmpNum(a.txns_24h, b.txns_24h, true);
-        if (sort === "txn-asc") return cmpNum(a.txns_24h, b.txns_24h, false);
-        if (sort === "age-desc") return cmpNum(rowAge(a), rowAge(b), true);
-        if (sort === "age-asc") return cmpNum(rowAge(a), rowAge(b), false);
-        if (sort === "scan-desc") return cmpNum(rowScanTotal(a), rowScanTotal(b), true);
-        if (sort === "scan-asc") return cmpNum(rowScanTotal(a), rowScanTotal(b), false);
-        return String(b.last_buy_time || "").localeCompare(String(a.last_buy_time || ""));
+        if (sort === "change-desc") return cmpNum(a.change_pct, b.change_pct, true);
+        if (sort === "change-asc") return cmpNum(a.change_pct, b.change_pct, false);
+        if (sort === "age-desc") return cmpNum(a.age_seconds, b.age_seconds, true);
+        if (sort === "age-asc") return cmpNum(a.age_seconds, b.age_seconds, false);
+        return cmpNum(a.time_to, b.time_to, true);
       });
       return rows;
     }
 
-    function rowMeta(t) {
-      if (statusFilter === "sold" || t.status === "sold") {
-        return { text: pnl(t.total_pnl), cls: cls(t.total_pnl) };
-      }
-      return { text: pnl(t.net_pnl), cls: cls(t.net_pnl) };
-    }
-
-    function rowScans(t) {
-      const counts = (t.scan_count || []).map(n => Number(n) || 0).filter(n => n > 0);
-      if (counts.length > 1) return counts.join(" · ") + " scans";
-      const n = counts.length ? counts[0] : t.scan_total;
-      return (n == null ? 0 : n) + " scans";
-    }
-
     function renderList() {
       const rows = visible();
-      $("list").innerHTML = rows.length ? rows.map(t => {
-        const meta = rowMeta(t);
-        return `
+      $("list").innerHTML = rows.length ? rows.map(t => `
         <div class="row ${t.address === selected ? "active" : ""}" data-addr="${esc(t.address)}">
-          <div class="dot ${esc(t.status)}"></div>
+          <div class="dot ${Number(t.change_pct) >= 0 ? "open" : "sold"}"></div>
           <div>
-            <div class="sym">${esc(t.symbol)}</div>
-            <div class="name">${esc(t.name)}</div>
-            <div class="metrics">${usdCompact(t.liquidity_usd)} · ${usdCompact(t.volume_24h)} · ${t.txns_24h == null ? "—" : num(t.txns_24h, 0)} · ${age(t.pair_age)} · ${rowScans(t)}</div>
+            <div class="sym mint">${esc(shortMint(t.address))}</div>
+            <div class="metrics">${esc(t.interval || "1m")} · ${ageSec(t.age_seconds)}</div>
           </div>
-          <div>
-            <div class="row-pnl ${meta.cls}">${meta.text}</div>
-            <div class="row-hold">${holdAge(t.last_buy_time)}</div>
-          </div>
-        </div>`;
-      }).join("") : `<div class="empty">No tokens match.</div>`;
+        </div>`).join("") : `<div class="empty">No OHLC files match.</div>`;
     }
 
     function detail(t) {
-      const buys = (t.buys || []).map(b => `
-        <tr>
-          <td>${esc(b.time || "—")}</td>
-          <td>${usd(b.liquidity)}</td>
-          <td>${usd(b.volume_24h_usd)}</td>
-          <td>${age(b.pair_age)}</td>
-          <td class="reason">${esc(b.filter_reason || "—")}</td>
-        </tr>`).join("") || `<tr><td colspan="5" class="reason">No buys yet.</td></tr>`;
-      const sells = (t.sells || []).map(s => `
-        <tr>
-          <td>${esc(s.time || "—")}</td>
-          <td class="${cls(s.pnl)}">${pnl(s.pnl)}</td>
-          <td>${esc(s.reason || "—")}</td>
-        </tr>`).join("") || `<tr><td colspan="3" class="reason">No sells yet.</td></tr>`;
-      const scanGroups = t.scans || [];
-      const scans = scanGroups.length ? scanGroups.map((group, gi) => {
-        const rows = (group || []).map((s, si) => `
-          <tr>
-            <td>${esc(s.scan_time || "—")}${si === 0 ? ' <span class="reason">buy</span>' : ""}</td>
-            <td>${usd(s.liquidity_usd)}</td>
-            <td>${usd(s.volume_24h_usd)}</td>
-            <td>${s.holders == null || s.holders === "" ? "—" : num(s.holders, 0)}</td>
-            <td>${s.price == null || s.price === "" ? "—" : tokenPrice(s.price) + " SOL"}</td>
-            <td class="reason">${esc(s.filter_reason || "—")}</td>
-          </tr>`).join("") || `<tr><td colspan="6" class="reason">Empty group.</td></tr>`;
-        return `
-          <h2>Scans · buy ${gi + 1}</h2>
-          <table>
-            <thead><tr><th>Time</th><th>Liquidity</th><th>24h volume</th><th>Holders</th><th>Price</th><th>Filter</th></tr></thead>
-            <tbody>${rows}</tbody>
-          </table>`;
-      }).join("") : `<h2>Scans</h2><table><tbody><tr><td colspan="6" class="reason">No scans yet.</td></tr></tbody></table>`;
+      const intervals = INTERVALS.map(r =>
+        `<option value="${r}" ${r === chartInterval ? "selected" : ""}>${r}</option>`
+      ).join("");
       return `
-        <h1>${esc(t.symbol)}</h1>
-        <div class="meta">${esc(t.name)} · ${esc(t.status)}</div>
+        <h1 class="mint">${esc(shortMint(t.address))}</h1>
+        <div class="meta">${esc(t.interval || "1m")} · ${esc(t.source || "birdeye")}</div>
         <div class="addr">
           <span>${esc(t.address)}</span>
           <button class="chip" data-copy="${esc(t.address)}">Copy</button>
-          ${t.address ? `<a href="${DEX}${encodeURIComponent(t.address)}" target="_blank" rel="noreferrer">Dexscreener</a>
+          <a href="${DEX}${encodeURIComponent(t.address)}" target="_blank" rel="noreferrer">Dexscreener</a>
           <a href="${GMGN}${encodeURIComponent(t.address)}" target="_blank" rel="noreferrer">GMGN</a>
-          <a href="${SOL}${encodeURIComponent(t.address)}" target="_blank" rel="noreferrer">Solscan</a>` : ""}
+          <a href="${SOL}${encodeURIComponent(t.address)}" target="_blank" rel="noreferrer">Solscan</a>
         </div>
         <div class="cards">
-          <div class="card"><span>Price</span><b>${t.price == null || t.price === "" ? "—" : tokenPrice(t.price) + " SOL"}</b></div>
-          <div class="card"><span>Liquidity</span><b>${usd(t.liquidity_usd)}</b></div>
-          <div class="card"><span>Pair age</span><b>${age(t.pair_age ?? t.last_pair_age)}</b></div>
-          <div class="card"><span>24h volume</span><b>${usd(t.volume_24h)}</b></div>
-          <div class="card"><span>24h txns</span><b>${t.txns_24h == null ? "—" : num(t.txns_24h, 0)}</b></div>
-          <div class="card"><span>Scans</span><b>${t.scan_total == null ? "—" : num(t.scan_total, 0)}</b></div>
-          <div class="card"><span>Net PnL</span><b class="${cls(t.net_pnl)}">${pnl(t.net_pnl)}</b></div>
+          <div class="card"><span>Last</span><b>${tokenPrice(t.last)}</b></div>
+          <div class="card"><span>Age</span><b>${ageSec(t.age_seconds)}</b></div>
+          <div class="card"><span>Exported</span><b>${esc((t.exported_at || "").replace("T", " ").slice(0, 19) || "—")}</b></div>
         </div>
-        <h2>Buys</h2>
-        <table>
-          <thead><tr><th>Time</th><th>Liquidity</th><th>24h volume</th><th>Age</th><th>Filter</th></tr></thead>
-          <tbody>${buys}</tbody>
-        </table>
-        ${scans}
-        <h2>Sells</h2>
-        <table>
-          <thead><tr><th>Time</th><th>PnL</th><th>Reason</th></tr></thead>
-          <tbody>${sells}</tbody>
-        </table>
+        <div class="chart-panel">
+          <div class="chart-toolbar">
+            <select id="interval">${intervals}</select>
+            <button class="chip ${showPivots ? "on" : ""}" id="pivotToggle" type="button">Pivot</button>
+            <button class="chip ${showSwingLine ? "on" : ""}" id="swingLineToggle" type="button">Line</button>
+            <button class="chip ${showKama ? "on" : ""}" id="kamaToggle" type="button">KAMA</button>
+            <span class="chart-bias" id="chartBias"></span>
+          </div>
+          <div class="chart-params" id="structureParams">
+            <div class="chart-param-group">
+              <label class="chart-param">ATR <input id="pAtrPeriod" type="number" min="1" step="1"></label>
+              <label class="chart-param">× <input id="pAtrMult" type="number" min="0" step="0.1"></label>
+              <label class="chart-param">min <input id="pAtrMinPct" type="number" min="0" step="0.0001"></label>
+            </div>
+            <div class="chart-param-group">
+              <label class="chart-param">min price <input id="pMinPriceDist" type="number" min="0" step="0.001"></label>
+              <label class="chart-param">bars <input id="pMinBars" type="number" min="0" step="1"></label>
+            </div>
+            <div class="chart-param-group">
+              <label class="chart-param">KAMA <input id="pKamaPeriod" type="number" min="1" step="1"></label>
+              <label class="chart-param">fast <input id="pKamaFast" type="number" min="1" step="1"></label>
+              <label class="chart-param">slow <input id="pKamaSlow" type="number" min="1" step="1"></label>
+              <label class="chart-param">slope <input id="pKamaSlope" type="number" min="1" step="1"></label>
+              <label class="chart-param">flat <input id="pKamaFlat" type="number" min="0" step="0.01"></label>
+            </div>
+          </div>
+          <div class="chart-stage" id="chartStage">
+            <div class="chart-empty" id="chartEmpty">Loading chart...</div>
+          </div>
+          <div class="chart-ohlc" id="chartOhlc"></div>
+        </div>
       `;
+    }
+
+    function bindChartControls() {
+      if (!$("chartStage")) return;
+      $("interval").addEventListener("change", () => {
+        chartInterval = $("interval").value;
+        syncUrl();
+        const token = tokens.find(t => t.address === selected);
+        if (token) loadCurve(token);
+      });
+      bindOverlayToggle("pivotToggle", () => { showPivots = !showPivots; });
+      bindOverlayToggle("swingLineToggle", () => { showSwingLine = !showSwingLine; });
+      bindOverlayToggle("kamaToggle", () => { showKama = !showKama; });
+      fillStructureInputs();
+      let paramTimer = null;
+      document.querySelectorAll("#structureParams input").forEach(input => {
+        input.addEventListener("input", () => {
+          clearTimeout(paramTimer);
+          paramTimer = setTimeout(() => onStructureParamChange(false), 80);
+        });
+        input.addEventListener("change", () => onStructureParamChange(true));
+        input.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") { e.preventDefault(); onStructureParamChange(true); }
+        });
+      });
+    }
+
+    function bindOverlayToggle(id, flip) {
+      const btn = $(id);
+      if (!btn) return;
+      btn.addEventListener("click", () => {
+        flip();
+        btn.classList.toggle("on");
+        if (tvChart) applyStructure((chartData && chartData.points) || []);
+      });
+    }
+
+    function fillStructureInputs() {
+      const set = (id, value) => { const el = $(id); if (el) el.value = value; };
+      set("pAtrPeriod", ATR_PERIOD);
+      set("pAtrMult", ATR_MULT);
+      set("pAtrMinPct", ATR_MIN_PCT);
+      set("pMinPriceDist", MIN_PRICE_DISTANCE);
+      set("pMinBars", MIN_BAR_DISTANCE);
+      set("pKamaPeriod", KAMA_PERIOD);
+      set("pKamaFast", KAMA_FAST);
+      set("pKamaSlow", KAMA_SLOW);
+      set("pKamaSlope", KAMA_SLOPE);
+      set("pKamaFlat", KAMA_FLAT_ATR);
+    }
+
+    function readNum(id, fallback, min) {
+      const n = Number($(id) && $(id).value);
+      if (!Number.isFinite(n)) return fallback;
+      return min == null ? n : Math.max(min, n);
+    }
+
+    function onStructureParamChange(normalize) {
+      ATR_PERIOD = Math.max(1, Math.round(readNum("pAtrPeriod", ATR_PERIOD, 1)));
+      ATR_MULT = Math.max(0, readNum("pAtrMult", ATR_MULT, 0));
+      ATR_MIN_PCT = Math.max(0, readNum("pAtrMinPct", ATR_MIN_PCT, 0));
+      MIN_PRICE_DISTANCE = Math.max(0, readNum("pMinPriceDist", MIN_PRICE_DISTANCE, 0));
+      MIN_BAR_DISTANCE = Math.max(0, Math.round(readNum("pMinBars", MIN_BAR_DISTANCE, 0)));
+      KAMA_PERIOD = Math.max(1, Math.round(readNum("pKamaPeriod", KAMA_PERIOD, 1)));
+      KAMA_FAST = Math.max(1, Math.round(readNum("pKamaFast", KAMA_FAST, 1)));
+      KAMA_SLOW = Math.max(1, Math.round(readNum("pKamaSlow", KAMA_SLOW, 1)));
+      KAMA_SLOPE = Math.max(1, Math.round(readNum("pKamaSlope", KAMA_SLOPE, 1)));
+      KAMA_FLAT_ATR = Math.max(0, readNum("pKamaFlat", KAMA_FLAT_ATR, 0));
+      if (normalize) fillStructureInputs();
+      if (tvChart) applyStructure((chartData && chartData.points) || []);
+    }
+
+    async function loadCurve(token) {
+      if (chartAbort) chartAbort.abort();
+      chartAbort = new AbortController();
+      const empty = $("chartEmpty");
+      if (empty) { empty.hidden = false; empty.textContent = "Loading chart..."; }
+      const qs = new URLSearchParams({ address: token.address, interval: chartInterval });
+      if (chartWallet) qs.set("wallet", chartWallet);
+      else if (token.wallet) qs.set("wallet", token.wallet);
+      try {
+        const res = await fetch("/api/ohlc/curve?" + qs.toString(), {
+          cache: "no-store",
+          signal: chartAbort.signal,
+        });
+        if (!res.ok) throw new Error("missing");
+        overviewData = await res.json();
+        chartData = overviewData;
+        const points = chartData.points || [];
+        if (empty) {
+          empty.hidden = !!points.length;
+          if (!points.length) empty.textContent = "No candles in this range.";
+        }
+        drawChart(true);
+      } catch (err) {
+        if (err.name === "AbortError") return;
+        chartData = null;
+        overviewData = null;
+        destroyChart();
+        if (empty) { empty.hidden = false; empty.textContent = "Could not load OHLCV."; }
+      }
+    }
+
+    function destroyChart() {
+      if (tvChart) {
+        tvChart.remove();
+        tvChart = null;
+      }
+      candleSeries = null;
+      lineSeries = null;
+      swingSeries = null;
+      volumeSeries = null;
+    }
+
+    function mergePoints(base, extra) {
+      if (!extra.length) return base;
+      const from = extra[0].t, to = extra[extra.length - 1].t;
+      return base.filter(p => p.t < from || p.t > to).concat(extra).sort((a, b) => a.t - b.t);
+    }
+
+    function seriesData(points) {
+      const candles = [];
+      const line = [];
+      const volume = [];
+      const seen = new Set();
+      for (const p of points) {
+        const time = Number(p.t);
+        if (!Number.isFinite(time) || seen.has(time)) continue;
+        seen.add(time);
+        const bull = Number(p.c) >= Number(p.o);
+        candles.push({ time, open: p.o, high: p.h, low: p.l, close: p.c });
+        line.push({ time, value: p.c });
+        volume.push({
+          time,
+          value: p.v_usd || p.v || 0,
+          color: bull ? "rgba(38,166,154,0.45)" : "rgba(239,83,80,0.45)",
+        });
+      }
+      return { candles, line, volume };
+    }
+
+    function structureRows(points) {
+      const rows = [];
+      const seen = new Set();
+      for (const p of points) {
+        const t = Number(p.t ?? p.time);
+        const h = Number(p.h ?? p.high);
+        const l = Number(p.l ?? p.low);
+        const c = Number(p.c ?? p.close);
+        const o = Number(p.o ?? p.open);
+        if (!Number.isFinite(t) || !Number.isFinite(h) || !Number.isFinite(l) || !Number.isFinite(c) || seen.has(t)) continue;
+        seen.add(t);
+        rows.push({ t, o: Number.isFinite(o) ? o : c, h, l, c });
+      }
+      return rows;
+    }
+
+    function lastAtr(atr, i) {
+      for (let j = i; j >= 0; j--) if (atr[j] != null) return atr[j];
+      return 0;
+    }
+
+    function wilderAtr(rows, period) {
+      const atr = new Array(rows.length).fill(null);
+      if (!rows.length) return atr;
+      const trs = rows.map((row, i) => {
+        if (i === 0) return row.h - row.l;
+        const prev = rows[i - 1].c;
+        return Math.max(row.h - row.l, Math.abs(row.h - prev), Math.abs(row.l - prev));
+      });
+      if (trs.length < period) return atr;
+      let value = 0;
+      for (let i = 0; i < period; i++) value += trs[i];
+      value /= period;
+      atr[period - 1] = value;
+      for (let i = period; i < trs.length; i++) {
+        value = (value * (period - 1) + trs[i]) / period;
+        atr[i] = value;
+      }
+      return atr;
+    }
+
+    function kamaValues(rows, period, fast, slow) {
+      const out = new Array(rows.length).fill(null);
+      if (rows.length <= period) return out;
+      const fastSc = 2 / (fast + 1);
+      const slowSc = 2 / (slow + 1);
+      let value = rows[period].c;
+      out[period] = value;
+      for (let i = period + 1; i < rows.length; i++) {
+        const change = Math.abs(rows[i].c - rows[i - period].c);
+        let volatility = 0;
+        for (let j = i - period + 1; j <= i; j++) volatility += Math.abs(rows[j].c - rows[j - 1].c);
+        const er = volatility === 0 ? 0 : change / volatility;
+        const sc = (er * (fastSc - slowSc) + slowSc) ** 2;
+        value = value + sc * (rows[i].c - value);
+        out[i] = value;
+      }
+      return out;
+    }
+
+    function kamaFilter(price, kama, atr, i) {
+      const current = kama[i];
+      const previous = i >= KAMA_SLOPE ? kama[i - KAMA_SLOPE] : null;
+      if (current == null || previous == null) return "neutral";
+      const noise = lastAtr(atr, i) * KAMA_FLAT_ATR;
+      const delta = current - previous;
+      if (Math.abs(delta) <= noise) return "neutral";
+      if (price > current && delta > 0) return "bullish";
+      if (price < current && delta < 0) return "bearish";
+      return "neutral";
+    }
+
+    function detectPivots(rows, left, right) {
+      const pivots = [];
+      for (let i = left + right; i < rows.length; i++) {
+        const mid = i - right;
+        const high = rows[mid].h, low = rows[mid].l;
+        let isHigh = true, isLow = true;
+        for (let j = mid - left; j <= mid + right; j++) {
+          if (j === mid) continue;
+          if (rows[j].h >= high) isHigh = false;
+          if (rows[j].l <= low) isLow = false;
+          if (!isHigh && !isLow) break;
+        }
+        if (isHigh === isLow) continue;
+        pivots.push({ i, t: rows[i].t, price: rows[i].c, kind: isHigh ? "high" : "low" });
+      }
+      return pivots;
+    }
+
+    function filterPivots(raw, rows, atr, atrMult) {
+      const out = [];
+      for (const pivot of raw) {
+        const price = Math.abs(pivot.price) || Math.abs(rows[pivot.i].c) || 0;
+        const confirmI = Math.min(pivot.i, rows.length - 1);
+        const noise = Math.max(lastAtr(atr, confirmI) * atrMult, price * ATR_MIN_PCT);
+        if (!out.length) { out.push(pivot); continue; }
+        const last = out[out.length - 1];
+        if (pivot.kind === last.kind) {
+          if (pivot.kind === "high" && pivot.price >= last.price) out[out.length - 1] = pivot;
+          else if (pivot.kind === "low" && pivot.price <= last.price) out[out.length - 1] = pivot;
+          continue;
+        }
+        const move = Math.abs(pivot.price - last.price);
+        const base = Math.abs(last.price) || price;
+        if (MIN_PRICE_DISTANCE > 0 && base && (move / base) <= MIN_PRICE_DISTANCE) continue;
+        if (MIN_BAR_DISTANCE > 0 && (pivot.i - last.i) < MIN_BAR_DISTANCE) continue;
+        if (move < noise) continue;
+        out.push(pivot);
+      }
+      return out;
+    }
+
+    function classifyPivots(pivots) {
+      let lastHigh = null, lastLow = null;
+      for (const pivot of pivots) {
+        if (pivot.kind === "high") {
+          pivot.label = lastHigh == null ? "H" : (pivot.price > lastHigh.price ? "HH" : "LH");
+          lastHigh = pivot;
+        } else {
+          pivot.label = lastLow == null ? "L" : (pivot.price > lastLow.price ? "HL" : "LL");
+          lastLow = pivot;
+        }
+      }
+    }
+
+    function trendAfter(trend, lastHigh, lastLow) {
+      const highLabel = lastHigh && lastHigh.label;
+      const lowLabel = lastLow && lastLow.label;
+      if (highLabel === "HH" && lowLabel === "HL") return "bullish";
+      if (highLabel === "LH" && lowLabel === "LL") return "bearish";
+      return trend;
+    }
+
+    function analyzeStructure(points) {
+      const rows = structureRows(points);
+      const empty = { pivots: [], events: [], kama: [], trend: "neutral", kama_filter: "neutral", last_high: null, last_low: null };
+      if (rows.length < PIVOT_LEFT + PIVOT_RIGHT + 2) return empty;
+      const atr = wilderAtr(rows, ATR_PERIOD);
+      const kama = kamaValues(rows, KAMA_PERIOD, KAMA_FAST, KAMA_SLOW);
+      const swings = filterPivots(detectPivots(rows, PIVOT_LEFT, PIVOT_RIGHT), rows, atr, ATR_MULT);
+      classifyPivots(swings);
+      const confirmAt = new Map();
+      for (const pivot of swings) {
+        const key = pivot.i;
+        if (!confirmAt.has(key)) confirmAt.set(key, []);
+        confirmAt.get(key).push(pivot);
+      }
+      let trend = "neutral";
+      let lastHigh = null, lastLow = null;
+      let highBroken = false, lowBroken = false;
+      const events = [];
+      const pub = (p) => p && ({ t: p.t, price: p.price, kind: p.kind, label: p.label });
+      for (let i = 0; i < rows.length; i++) {
+        for (const pivot of (confirmAt.get(i) || [])) {
+          if (pivot.kind === "high") { lastHigh = pivot; highBroken = false; }
+          else { lastLow = pivot; lowBroken = false; }
+          trend = trendAfter(trend, lastHigh, lastLow);
+        }
+        const bias = kamaFilter(rows[i].c, kama, atr, i);
+        const close = rows[i].c;
+        if (trend === "bullish") {
+          if (lastHigh && !highBroken && close > lastHigh.price) {
+            if (bias !== "bearish") events.push({ t: rows[i].t, label: "BOS", kind: "bull" });
+            highBroken = true;
+          }
+          if (lastLow && !lowBroken && close < lastLow.price) {
+            events.push({ t: rows[i].t, label: "CHoCH", kind: "bear" });
+            lowBroken = true;
+            trend = "bearish";
+          }
+        } else if (trend === "bearish") {
+          if (lastLow && !lowBroken && close < lastLow.price) {
+            if (bias !== "bullish") events.push({ t: rows[i].t, label: "BOS", kind: "bear" });
+            lowBroken = true;
+          }
+          if (lastHigh && !highBroken && close > lastHigh.price) {
+            events.push({ t: rows[i].t, label: "CHoCH", kind: "bull" });
+            highBroken = true;
+            trend = "bullish";
+          }
+        }
+      }
+      const last = rows.length - 1;
+      return {
+        pivots: swings.map(pub),
+        events,
+        kama: kama.map((value, i) => value == null ? null : ({ t: rows[i].t, value })).filter(Boolean),
+        trend,
+        kama_filter: kamaFilter(rows[last].c, kama, atr, last),
+        last_high: pub(lastHigh),
+        last_low: pub(lastLow),
+      };
+    }
+
+    function structureMarkers(s) {
+      const markers = [];
+      const seen = new Set();
+      const add = (item) => {
+        if (!item || seen.has(item.time)) return;
+        seen.add(item.time);
+        markers.push(item);
+      };
+      if (!showPivots) return markers;
+      for (const p of s.pivots) {
+        const high = p.kind === "high";
+        const bull = p.label === "HH" || p.label === "HL" || p.label === "H";
+        add({
+          time: p.t,
+          position: high ? "aboveBar" : "belowBar",
+          color: bull ? "#5ee9a4" : "#ff7a8a",
+          shape: high ? "arrowDown" : "arrowUp",
+          text: p.label || "",
+          size: 2,
+        });
+      }
+      markers.sort((a, b) => a.time - b.time);
+      return markers;
+    }
+
+    function setBiasLegend(s) {
+      const el = $("chartBias");
+      if (!el) return;
+      if (!s) { el.innerHTML = ""; return; }
+      const trendCls = s.trend === "bullish" ? "pos" : s.trend === "bearish" ? "neg" : "";
+      const kamaCls = s.kama_filter === "bullish" ? "pos" : s.kama_filter === "bearish" ? "neg" : "";
+      const lastEvent = s.events && s.events.length ? s.events[s.events.length - 1] : null;
+      const eventHtml = lastEvent ? ` · <b>${esc(lastEvent.label)}</b>` : "";
+      el.innerHTML = `Trend <b class="${trendCls}">${esc(s.trend)}</b> · KAMA <b class="${kamaCls}">${esc(s.kama_filter)}</b>${eventHtml}`;
+    }
+
+    function applyStructure(points) {
+      try {
+        if (!candleSeries) return;
+        if (!showPivots && !showSwingLine && !showKama) {
+          if (candleSeries.setMarkers) candleSeries.setMarkers([]);
+          if (lineSeries) lineSeries.applyOptions({ visible: false });
+          if (swingSeries) swingSeries.applyOptions({ visible: false });
+          setBiasLegend(null);
+          return;
+        }
+        const s = analyzeStructure(points);
+        if (candleSeries.setMarkers) candleSeries.setMarkers(structureMarkers(s));
+        if (lineSeries) {
+          lineSeries.setData(s.kama.map(p => ({ time: p.t, value: p.value })));
+          lineSeries.applyOptions({
+            visible: showKama,
+            color: "#38bdf8",
+            lineWidth: 2,
+            priceLineVisible: false,
+            lastValueVisible: false,
+            crosshairMarkerVisible: false,
+          });
+        }
+        if (swingSeries) {
+          swingSeries.setData(s.pivots.map(p => ({ time: p.t, value: p.price })));
+          swingSeries.applyOptions({ visible: showSwingLine });
+        }
+        setBiasLegend((showPivots || showSwingLine || showKama) ? s : null);
+      } catch (err) {
+        setBiasLegend(null);
+      }
+    }
+
+    function setOhlcLegend(p) {
+      const el = $("chartOhlc");
+      if (!el) return;
+      if (!p) { el.innerHTML = ""; return; }
+      const bull = Number(p.close ?? p.c) >= Number(p.open ?? p.o);
+      el.className = "chart-ohlc " + (bull ? "up" : "down");
+      const o = p.open ?? p.o, h = p.high ?? p.h, l = p.low ?? p.l, c = p.close ?? p.c;
+      const vol = p.v_usd != null ? p.v_usd : p.value;
+      el.innerHTML = `
+        <span>O <b>${esc(tokenPrice(o))}</b></span>
+        <span>H <b>${esc(tokenPrice(h))}</b></span>
+        <span>L <b>${esc(tokenPrice(l))}</b></span>
+        <span>C <b>${esc(tokenPrice(c))}</b></span>
+        <span>Vol <b>${esc(usd(vol))}</b></span>
+        <span>${esc(when(p.time || p.t))}</span>`;
+    }
+
+    function applyVisibleRange() {
+      if (!tvChart) return;
+      ignoreRange = true;
+      tvChart.timeScale().fitContent();
+      requestAnimationFrame(() => { ignoreRange = false; });
+    }
+
+    function onVisibleRange(range) {
+      if (ignoreRange || !range || !selected) return;
+      clearTimeout(rangeTimer);
+      rangeTimer = setTimeout(() => loadVisibleDetail(range), 180);
+    }
+
+    async function loadVisibleDetail(range) {
+      const token = tokens.find(t => t.address === selected);
+      if (!token || !overviewData) return;
+      const span = Number(range.to) - Number(range.from);
+      if (!Number.isFinite(span) || span <= 0) return;
+      if (detailAbort) detailAbort.abort();
+      detailAbort = new AbortController();
+      const qs = new URLSearchParams({
+        address: token.address,
+        interval: chartInterval,
+        from: String(Math.floor(range.from)),
+        to: String(Math.ceil(range.to)),
+      });
+      if (chartWallet) qs.set("wallet", chartWallet);
+      else if (token.wallet) qs.set("wallet", token.wallet);
+      try {
+        const res = await fetch("/api/ohlc/curve?" + qs.toString(), {
+          cache: "no-store",
+          signal: detailAbort.signal,
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        const extra = data.points || [];
+        if (!extra.length) return;
+        chartData = {
+          ...overviewData,
+          resolution: "detail",
+          points: mergePoints(overviewData.points || [], extra),
+        };
+        drawChart(false);
+      } catch (err) {
+        if (err.name !== "AbortError") return;
+      }
+    }
+
+    function drawChart(resetView) {
+      const host = $("chartStage");
+      if (!host || typeof LightweightCharts === "undefined") return;
+      const points = (chartData && chartData.points) || [];
+      if (!points.length) {
+        destroyChart();
+        return;
+      }
+      const data = seriesData(points);
+      if (!tvChart) {
+        tvChart = LightweightCharts.createChart(host, {
+          autoSize: true,
+          layout: {
+            background: { color: "#0b0d11" },
+            textColor: "#8b94a7",
+            fontFamily: '"Segoe UI", system-ui, sans-serif',
+          },
+          grid: {
+            vertLines: { color: "#1c2230" },
+            horzLines: { color: "#1c2230" },
+          },
+          crosshair: {
+            mode: LightweightCharts.CrosshairMode.Normal,
+            vertLine: { color: "#8b94a7", width: 1, style: 3, labelBackgroundColor: "#181c25" },
+            horzLine: { color: "#8b94a7", width: 1, style: 3, labelBackgroundColor: "#181c25" },
+          },
+          rightPriceScale: {
+            borderColor: "#262c38",
+            scaleMargins: { top: 0.14, bottom: 0.22 },
+          },
+          timeScale: {
+            borderColor: "#262c38",
+            timeVisible: true,
+            secondsVisible: true,
+            fixLeftEdge: true,
+            fixRightEdge: false,
+            rightOffset: 8,
+            lockVisibleTimeRangeOnResize: true,
+            tickMarkFormatter: chartTick,
+          },
+          localization: {
+            locale: "en-US",
+            timeFormatter: (time) => when(typeof time === "object" && time != null ? (time.timestamp ?? time) : time),
+            priceFormatter: tokenPrice,
+          },
+        });
+        candleSeries = tvChart.addCandlestickSeries({
+          upColor: "#26a69a",
+          downColor: "#ef5350",
+          borderUpColor: "#26a69a",
+          borderDownColor: "#ef5350",
+          wickUpColor: "#26a69a",
+          wickDownColor: "#ef5350",
+          priceLineVisible: true,
+          lastValueVisible: true,
+          priceFormat: { type: "custom", minMove: 1e-12, formatter: tokenPrice },
+        });
+        lineSeries = tvChart.addLineSeries({
+          color: "#38bdf8",
+          lineWidth: 2,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          crosshairMarkerVisible: false,
+          visible: false,
+          priceFormat: { type: "custom", minMove: 1e-12, formatter: tokenPrice },
+        });
+        swingSeries = tvChart.addLineSeries({
+          color: "rgba(224,181,106,0.9)",
+          lineWidth: 1,
+          lineStyle: (LightweightCharts.LineStyle && LightweightCharts.LineStyle.Dashed) || 2,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          crosshairMarkerVisible: false,
+          visible: false,
+          priceFormat: { type: "custom", minMove: 1e-12, formatter: tokenPrice },
+        });
+        volumeSeries = tvChart.addHistogramSeries({
+          priceFormat: { type: "volume" },
+          priceScaleId: "volume",
+          lastValueVisible: false,
+          priceLineVisible: false,
+        });
+        tvChart.priceScale("volume").applyOptions({
+          scaleMargins: { top: 0.82, bottom: 0 },
+        });
+        tvChart.subscribeCrosshairMove((param) => {
+          const points = (chartData && chartData.points) || [];
+          if (!param || !param.time || !candleSeries) {
+            const last = points[points.length - 1];
+            if (last) setOhlcLegend(last);
+            return;
+          }
+          const candle = param.seriesData.get(candleSeries);
+          const vol = volumeSeries && param.seriesData.get(volumeSeries);
+          if (candle) setOhlcLegend({ ...candle, time: param.time, v_usd: vol && vol.value });
+        });
+        tvChart.timeScale().subscribeVisibleTimeRangeChange(onVisibleRange);
+      }
+      candleSeries.setData(data.candles);
+      volumeSeries.setData(data.volume);
+      applyStructure(points);
+      if (resetView) applyVisibleRange();
+      const last = points[points.length - 1];
+      if (last) setOhlcLegend(last);
     }
 
     $("q").addEventListener("input", renderList);
     $("sort").addEventListener("change", renderList);
-    document.querySelectorAll(".pills button").forEach(btn => {
-      btn.addEventListener("click", () => {
-        statusFilter = btn.dataset.status;
-        document.querySelectorAll(".pills button").forEach(b => b.classList.toggle("on", b === btn));
-        renderList();
-      });
+    $("wallet").addEventListener("change", () => {
+      chartWallet = $("wallet").value;
+      tokens = [];
+      syncUrl();
+      load();
     });
     $("list").addEventListener("click", (e) => {
       const row = e.target.closest(".row");
@@ -555,3 +1147,13 @@ PAGE_HTML = """<!DOCTYPE html>
 </body>
 </html>
 """
+
+def page_html() -> str:
+    return (
+        _PAGE_HTML
+        .replace("__STRUCTURE_CONFIG__", json.dumps(structure_params()))
+        .replace("__LOCAL_TIMEZONE__", json.dumps(LOCAL_TIMEZONE))
+    )
+
+
+PAGE_HTML = page_html()

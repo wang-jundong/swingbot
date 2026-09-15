@@ -32,6 +32,51 @@ def ohlc_root() -> Path:
     return Path(OHLC_PATH)
 
 
+def clear_ohlc_cache() -> None:
+    global _INDEX_CACHE
+    with _INDEX_LOCK:
+        _INDEX_CACHE = None
+    with _CURVE_LOCK:
+        _CURVE_CACHE.clear()
+
+
+def wallet_ohlc_folder(wallet: str) -> Path:
+    owner = safe_id(wallet)
+    if not owner:
+        raise ValueError("invalid wallet")
+    folder = ohlc_root() / owner
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
+
+
+def load_ohlc_file(wallet: str, mint: str) -> dict | None:
+    owner = safe_id(wallet)
+    token = safe_id(mint)
+    if not owner or not token:
+        return None
+    path = ohlc_root() / owner / f"{token}.json"
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def write_ohlc_file(wallet: str, payload: dict) -> Path:
+    owner = safe_id(wallet)
+    mint = safe_id(payload.get("mint"))
+    if not owner or not mint:
+        raise ValueError("invalid wallet or mint")
+    folder = ohlc_root() / owner
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{mint}.json"
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+    clear_ohlc_cache()
+    return path
+
+
 def safe_id(value: str | None) -> str | None:
     text = str(value or "").strip()
     return text if text and _SAFE_ID.fullmatch(text) else None
@@ -208,6 +253,8 @@ def _read_meta(path: Path, mint: str, wallet: str) -> dict:
         "time_to": _int_field(head, "time_to"),
         "candle_count": _int_field(head, "candle_count"),
         "exported_at": _text_field(head, "exported_at"),
+        "name": _text_field(head, "name"),
+        "symbol": _text_field(head, "symbol"),
         "first": first_close,
         "last": last_close,
         "change_pct": None if change_pct is None else round(change_pct, 4),

@@ -152,7 +152,12 @@ _PAGE_HTML = """<!DOCTYPE html>
     .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
     .dot.open { background: var(--green); }
     .dot.sold { background: var(--gold); }
-    .sym { font-weight: 650; }
+    .sym {
+      font-weight: 650;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .metrics { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; margin-top: 2px; }
     .detail { padding: 24px 28px 40px; }
     .empty { color: var(--muted); padding: 24px; }
@@ -274,7 +279,7 @@ _PAGE_HTML = """<!DOCTYPE html>
     <main>
       <aside class="list">
         <div class="filters">
-          <input id="q" placeholder="Search mint or wallet">
+          <input id="q" placeholder="Search name, mint or wallet">
           <select id="wallet"></select>
           <select id="sort">
             <option value="latest">Latest candle</option>
@@ -358,10 +363,24 @@ _PAGE_HTML = """<!DOCTYPE html>
       return x.toPrecision(4);
     };
     const shortMint = (a) => !a ? "—" : a.slice(0, 4) + "…" + a.slice(-4);
+    const tokenLabel = (t) => (t && (t.name || t.symbol)) || shortMint(t && t.address);
     const ageSec = (s) => (s == null || s === "") ? "—" : age(Number(s) / 86400);
     const when = (unix) => {
       if (unix == null || unix === "") return "—";
-      return new Date(Number(unix) * 1000).toLocaleString("en-US", { timeZone: LOCAL_TZ });
+      const parts = new Intl.DateTimeFormat("en-GB", {
+        timeZone: LOCAL_TZ,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+        hourCycle: "h23",
+      }).formatToParts(new Date(Number(unix) * 1000));
+      const get = (type) => (parts.find(p => p.type === type) || {}).value || "";
+      return get("year") + "-" + get("month") + "-" + get("day")
+        + " " + get("hour") + ":" + get("minute") + ":" + get("second");
     };
 
     function chartTime(unix) {
@@ -414,11 +433,40 @@ _PAGE_HTML = """<!DOCTYPE html>
       if (label) label.textContent = text || "Loading...";
     }
 
+    async function refreshSelected() {
+      if (loading) return;
+      const token = tokens.find(t => t.address === selected);
+      if (!token) return load();
+      loading = true;
+      $("refresh").disabled = true;
+      setOverlay("Fetching OHLC...");
+      try {
+        const res = await fetch("/api/ohlc/refresh", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify({
+            address: token.address,
+            wallet: chartWallet || token.wallet,
+            interval: token.interval,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "refresh failed");
+      } catch (err) {
+        setOverlay(err && err.message ? err.message : "Refresh failed");
+        await new Promise(r => setTimeout(r, 900));
+      } finally {
+        loading = false;
+      }
+      await load();
+    }
+
     async function load() {
       if (loading) return;
       loading = true;
       const first = !tokens.length;
-      if (first) setOverlay("Loading curves...");
+      if (first || !$("overlay").hidden) setOverlay($("overlayText").textContent || "Loading curves...");
       $("refresh").disabled = true;
       try {
         const qs = chartWallet == null ? "" : ("?wallet=" + encodeURIComponent(chartWallet || "all"));
@@ -466,7 +514,7 @@ _PAGE_HTML = """<!DOCTYPE html>
       const q = $("q").value.trim().toLowerCase();
       const rows = tokens.filter(t => {
         if (!q) return true;
-        return [t.address, t.wallet, ...(t.wallets || [])].some(v => String(v || "").toLowerCase().includes(q));
+        return [t.name, t.symbol, t.address, t.wallet, ...(t.wallets || [])].some(v => String(v || "").toLowerCase().includes(q));
       });
       const sort = $("sort").value;
       rows.sort((a, b) => {
@@ -485,7 +533,7 @@ _PAGE_HTML = """<!DOCTYPE html>
         <div class="row ${t.address === selected ? "active" : ""}" data-addr="${esc(t.address)}">
           <div class="dot ${Number(t.change_pct) >= 0 ? "open" : "sold"}"></div>
           <div>
-            <div class="sym mint">${esc(shortMint(t.address))}</div>
+            <div class="sym">${esc(tokenLabel(t))}</div>
             <div class="metrics">${esc(t.interval || "1m")} · ${ageSec(t.age_seconds)}</div>
           </div>
         </div>`).join("") : `<div class="empty">No OHLC files match.</div>`;
@@ -496,8 +544,8 @@ _PAGE_HTML = """<!DOCTYPE html>
         `<option value="${r}" ${r === chartInterval ? "selected" : ""}>${r}</option>`
       ).join("");
       return `
-        <h1 class="mint">${esc(shortMint(t.address))}</h1>
-        <div class="meta">${esc(t.interval || "1m")} · ${esc(t.source || "birdeye")}</div>
+        <h1>${esc(tokenLabel(t))}</h1>
+        <div class="meta">${esc([t.symbol, t.interval || "1m"].filter(Boolean).join(" · "))}</div>
         <div class="addr">
           <span>${esc(t.address)}</span>
           <button class="chip" data-copy="${esc(t.address)}">Copy</button>
@@ -508,7 +556,6 @@ _PAGE_HTML = """<!DOCTYPE html>
         <div class="cards">
           <div class="card"><span>Last</span><b>${tokenPrice(t.last)}</b></div>
           <div class="card"><span>Age</span><b>${ageSec(t.age_seconds)}</b></div>
-          <div class="card"><span>Exported</span><b>${esc((t.exported_at || "").replace("T", " ").slice(0, 19) || "—")}</b></div>
         </div>
         <div class="chart-panel">
           <div class="chart-toolbar">
@@ -1053,7 +1100,7 @@ _PAGE_HTML = """<!DOCTYPE html>
             tickMarkFormatter: chartTick,
           },
           localization: {
-            locale: "en-US",
+            locale: "en-GB",
             timeFormatter: (time) => when(typeof time === "object" && time != null ? (time.timestamp ?? time) : time),
             priceFormatter: tokenPrice,
           },
@@ -1141,7 +1188,7 @@ _PAGE_HTML = """<!DOCTYPE html>
       catch { btn.textContent = "Copy failed"; }
       setTimeout(() => { btn.textContent = "Copy"; }, 1200);
     });
-    $("refresh").addEventListener("click", () => load());
+    $("refresh").addEventListener("click", () => refreshSelected());
     load();
   </script>
 </body>

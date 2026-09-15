@@ -8,7 +8,7 @@ from urllib.parse import parse_qs, urlparse
 
 from src.config.web import WEB_HOST, WEB_PORT
 from src.utils.log_util import log_formatter
-from src.web.api import ohlc_curve_payload, ohlc_tokens_payload
+from src.web.api import ohlc_curve_payload, ohlc_tokens_payload, refresh_ohlc_payload
 from src.web.page import page_html
 
 _STATIC = Path(__file__).resolve().parent / "static"
@@ -90,10 +90,42 @@ class TokenDashboardHandler(BaseHTTPRequestHandler):
         self._send(404, "text/plain; charset=utf-8", b"not found")
 
     def do_POST(self) -> None:
+        path = urlparse(self.path).path
         length = int(self.headers.get("Content-Length") or 0)
-        if length:
-            self.rfile.read(length)
-        self._send(404, "text/plain; charset=utf-8", b"not found")
+        raw = self.rfile.read(length) if length else b""
+        if path != "/api/ohlc/refresh":
+            self._send(404, "text/plain; charset=utf-8", b"not found")
+            return
+        try:
+            body = json.loads(raw.decode("utf-8") or "{}")
+        except ValueError:
+            self._send(400, "application/json; charset=utf-8", b'{"error":"invalid json"}')
+            return
+        if not isinstance(body, dict):
+            self._send(400, "application/json; charset=utf-8", b'{"error":"invalid json"}')
+            return
+        address = str(body.get("address") or "")
+        wallet = body.get("wallet")
+        interval = body.get("interval")
+        try:
+            payload = refresh_ohlc_payload(address, wallet, interval)
+        except ValueError as exc:
+            self._send(
+                400,
+                "application/json; charset=utf-8",
+                json.dumps({"error": str(exc)}).encode("utf-8"),
+            )
+            return
+        except Exception:
+            logger.exception("failed to refresh ohlc")
+            self._send(500, "application/json", b'{"error":"failed to refresh ohlc"}')
+            return
+        self._send(
+            200,
+            "application/json; charset=utf-8",
+            json.dumps(payload).encode("utf-8"),
+            cache=False,
+        )
 
     def log_message(self, format: str, *args) -> None:
         logger.info("%s %s", self.address_string(), format % args)

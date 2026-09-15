@@ -1,6 +1,7 @@
 """JSON payloads for the OHLC curve dashboard."""
 
 from src.analysis.structure import analyze_structure
+from src.integrations.birdeye import export_mint_ohlc
 from src.storage.ohlc import default_wallet, list_ohlc_tokens, list_wallets, ohlc_curve, safe_id
 
 
@@ -13,6 +14,8 @@ def ohlc_tokens_payload(wallet: str | None = None, *, scoped: bool = False) -> d
             "address": token["address"],
             "wallet": token["wallet"],
             "wallets": token["wallets"],
+            "name": token.get("name"),
+            "symbol": token.get("symbol"),
             "interval": token.get("interval"),
             "source": token.get("source"),
             "creation_time": token.get("creation_time"),
@@ -49,3 +52,27 @@ def ohlc_curve_payload(
     if payload is not None:
         payload["structure"] = analyze_structure(payload.get("points") or [])
     return payload
+
+
+def refresh_ohlc_payload(
+    address: str,
+    wallet: str | None = None,
+    interval: str | None = None,
+) -> dict:
+    mint = safe_id(address)
+    owner = safe_id(wallet) or default_wallet()
+    if not mint:
+        raise ValueError("invalid mint")
+    if not owner:
+        raise ValueError("invalid wallet")
+    row = export_mint_ohlc(owner, mint, interval=interval)
+    return {
+        "ok": True,
+        "address": mint,
+        "wallet": owner,
+        "candles": row.get("candles") or 0,
+        "added": row.get("added") or 0,
+        "resumed": bool(row.get("resumed")),
+        "time_from": row.get("time_from"),
+        "time_to": row.get("time_to"),
+    }

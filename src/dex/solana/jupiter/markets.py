@@ -39,6 +39,33 @@ def price_sol(usd_price: float | None, sol_usd: float | None) -> float | None:
     return usd_price / sol_usd
 
 
+def fetch_token_metadata(addresses: list[str]) -> dict[str, dict]:
+    """Name, symbol, and creation_time keyed by mint from Jupiter token search."""
+    names: dict[str, dict] = {}
+    unique = [address for address in dict.fromkeys(addresses) if address]
+    for offset in range(0, len(unique), CHUNK_SIZE):
+        chunk = unique[offset:offset + CHUNK_SIZE]
+        try:
+            rows = _search(chunk)
+        except Exception:
+            logger.exception("Jupiter token metadata failed")
+            continue
+        for row in rows:
+            mint = str(row.get("id") or "")
+            if not mint:
+                continue
+            name = str(row.get("name") or "").strip()
+            symbol = str(row.get("symbol") or "").strip()
+            created = _created_unix(row)
+            if name or symbol or created:
+                names[mint] = {
+                    "name": name,
+                    "symbol": symbol,
+                    "creation_time": created,
+                }
+    return names
+
+
 def fetch_token_markets(addresses: list[str]) -> dict[str, dict]:
     """Liquidity in SOL, pair age, 24h volume, and 24h txns keyed by mint."""
     unique = [address for address in dict.fromkeys(addresses) if address]
@@ -106,6 +133,14 @@ def _liquidity_sol(liquidity_usd: float | None, sol_usd: float | None) -> float 
 
 
 def _pair_age_days(row: dict) -> float | None:
+    created = _created_unix(row)
+    if not created:
+        return None
+    age = (unix_now() - created) / SECONDS_PER_DAY
+    return round(age, 2) if age >= 0 else None
+
+
+def _created_unix(row: dict) -> int | None:
     pool = row.get("firstPool") or {}
     created = pool.get("createdAt") or row.get("createdAt")
     if not created:
@@ -116,5 +151,5 @@ def _pair_age_days(row: dict) -> float | None:
         return None
     if started.tzinfo is None:
         started = started.replace(tzinfo=timezone.utc)
-    age = (unix_now() - int(started.timestamp())) / SECONDS_PER_DAY
-    return round(age, 2) if age >= 0 else None
+    ts = int(started.timestamp())
+    return ts if ts > 0 else None

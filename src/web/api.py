@@ -1,6 +1,7 @@
 """JSON payloads for the OHLC curve dashboard."""
 
 from src.analysis.structure import analyze_structure
+from src.backtest.stats import dashboard_stats, me_marks, mint_stats
 from src.integrations.birdeye import export_mint_ohlc
 from src.storage.ohlc import default_wallet, list_ohlc_tokens, list_wallets, ohlc_curve, safe_id
 
@@ -30,6 +31,17 @@ def ohlc_tokens_payload(wallet: str | None = None, *, scoped: bool = False) -> d
         for token in list_ohlc_tokens(selected)
     ]
     wallets = list_wallets()
+    by_mint = mint_stats(selected)
+    for token in tokens:
+        token["backtest"] = by_mint.get(token["address"]) or {
+            "realized_pnl": 0.0,
+            "unrealized_pnl": 0.0,
+            "total_pnl": 0.0,
+            "wins": 0,
+            "losses": 0,
+            "trades": 0,
+            "fees_total": 0.0,
+        }
     return {
         "tokens": tokens,
         "wallets": wallets,
@@ -37,6 +49,7 @@ def ohlc_tokens_payload(wallet: str | None = None, *, scoped: bool = False) -> d
         "summary": {
             "token_count": len(tokens),
             "wallet_count": len(wallets),
+            "backtest": dashboard_stats(selected),
         },
     }
 
@@ -51,6 +64,8 @@ def ohlc_curve_payload(
     payload = ohlc_curve(address, wallet, interval, time_from, time_to)
     if payload is not None:
         payload["structure"] = analyze_structure(payload.get("points") or [])
+        payload["backtest"] = dashboard_stats(safe_id(wallet), safe_id(address))
+        payload["me"] = me_marks(safe_id(wallet), safe_id(address))
     return payload
 
 

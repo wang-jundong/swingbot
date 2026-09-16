@@ -49,9 +49,10 @@ _PAGE_HTML = """<!DOCTYPE html>
     .header-right {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 20px;
       margin-left: auto;
     }
+    .header-right .stats { justify-content: flex-end; }
     .refresh {
       background: var(--panel-2);
       border: 1px solid var(--line);
@@ -91,8 +92,8 @@ _PAGE_HTML = """<!DOCTYPE html>
       color: var(--gold);
       font-weight: 700;
     }
-    .stats { display: flex; gap: 18px; flex-wrap: wrap; }
-    .stat { min-width: 72px; }
+    .stats { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-end; }
+    .stat { min-width: 64px; }
     .stat b { display: block; font-variant-numeric: tabular-nums; }
     .stat span { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; }
     .pos { color: var(--green); }
@@ -259,7 +260,9 @@ _PAGE_HTML = """<!DOCTYPE html>
       align-items: center;
       justify-content: center;
       color: var(--muted);
+      z-index: 6;
     }
+    .chart-empty[hidden] { display: none !important; }
     .mint { font-family: ui-monospace, "Cascadia Mono", monospace; font-size: 13px; }
     @media (max-width: 840px) {
       main { grid-template-columns: 1fr; grid-template-rows: 42vh 1fr; }
@@ -271,8 +274,9 @@ _PAGE_HTML = """<!DOCTYPE html>
   <div class="app">
     <header>
       <div class="brand">Swingbot</div>
-      <div class="stats" id="stats"></div>
+      <div class="stats" id="counts"></div>
       <div class="header-right">
+        <div class="stats" id="stats"></div>
         <button class="refresh" id="refresh" type="button">Refresh</button>
       </div>
     </header>
@@ -318,19 +322,21 @@ _PAGE_HTML = """<!DOCTYPE html>
     let swingSeries = null;
     let volumeSeries = null;
     let showPivots = true;
+    let showAcceptedOpposites = true;
     let showSwingLine = true;
     let showKama = true;
+    let showTrades = true;
     let ignoreRange = false;
     let rangeTimer = null;
     let loading = false;
+    let meTrades = [];
     const INTERVALS = ["15s", "30s", "1m", "5m", "15m"];
     const STRUCTURE_DEFAULTS = __STRUCTURE_CONFIG__;
     const LOCAL_TZ = __LOCAL_TIMEZONE__;
     const PIVOT_LEFT = STRUCTURE_DEFAULTS.PIVOT_LEFT;
     const PIVOT_RIGHT = STRUCTURE_DEFAULTS.PIVOT_RIGHT;
     let ATR_PERIOD = STRUCTURE_DEFAULTS.ATR_PERIOD;
-    let ATR_MULT = STRUCTURE_DEFAULTS.ATR_MULT;
-    let ATR_MIN_PCT = STRUCTURE_DEFAULTS.ATR_MIN_PCT;
+    let PIVOT_ATR_MULT = STRUCTURE_DEFAULTS.PIVOT_ATR_MULT;
     let MIN_PRICE_DISTANCE = STRUCTURE_DEFAULTS.MIN_PRICE_DISTANCE;
     let MIN_BAR_DISTANCE = STRUCTURE_DEFAULTS.MIN_BAR_DISTANCE;
     let KAMA_PERIOD = STRUCTURE_DEFAULTS.KAMA_PERIOD;
@@ -496,11 +502,37 @@ _PAGE_HTML = """<!DOCTYPE html>
       if (!wallets.includes(chartWallet)) chartWallet = "";
     }
 
+    function pnlClass(n) {
+      const x = Number(n);
+      if (!Number.isFinite(x) || x === 0) return "";
+      return x > 0 ? "pos" : "neg";
+    }
+    function sol(n, signed = true) {
+      if (n == null || n === "") return "—";
+      const x = Number(n);
+      if (!Number.isFinite(x)) return "—";
+      const sign = signed && x > 0 ? "+" : "";
+      return sign + x.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+    }
     function renderStats(s) {
-      $("stats").innerHTML = [
-        ["Wallets", s.wallet_count ?? 0],
-        ["Tokens", s.token_count ?? 0],
-      ].map(([k, v]) => `<div class="stat"><b>${esc(v)}</b><span>${k}</span></div>`).join("");
+      const bt = s.backtest || {};
+      const counts = [
+        ["Wallets", s.wallet_count ?? 0, ""],
+        ["Tokens", s.token_count ?? 0, ""],
+      ];
+      const items = [
+        ["Realized", sol(bt.realized_pnl), pnlClass(bt.realized_pnl)],
+        ["Unrealized", sol(bt.unrealized_pnl), pnlClass(bt.unrealized_pnl)],
+        ["Total PnL", sol(bt.total_pnl), pnlClass(bt.total_pnl)],
+        ["W / L / Trades", `${bt.wins ?? 0} / ${bt.losses ?? 0} / ${bt.trades ?? 0}`, ""],
+        ["Fees", sol(bt.fees_total, false), ""],
+      ];
+      const html = (rows) => rows.map(([k, v, cls]) =>
+        `<div class="stat"><b class="${cls}">${esc(v)}</b><span>${k}</span></div>`
+      ).join("");
+      const countsEl = $("counts");
+      if (countsEl) countsEl.innerHTML = html(counts);
+      $("stats").innerHTML = html(items);
     }
 
     function cmpNum(a, b, desc) {
@@ -543,6 +575,7 @@ _PAGE_HTML = """<!DOCTYPE html>
       const intervals = INTERVALS.map(r =>
         `<option value="${r}" ${r === chartInterval ? "selected" : ""}>${r}</option>`
       ).join("");
+      const bt = t.backtest || {};
       return `
         <h1>${esc(tokenLabel(t))}</h1>
         <div class="meta">${esc([t.symbol, t.interval || "1m"].filter(Boolean).join(" · "))}</div>
@@ -556,20 +589,26 @@ _PAGE_HTML = """<!DOCTYPE html>
         <div class="cards">
           <div class="card"><span>Last</span><b>${tokenPrice(t.last)}</b></div>
           <div class="card"><span>Age</span><b>${ageSec(t.age_seconds)}</b></div>
+          <div class="card"><span>Realized</span><b class="${pnlClass(bt.realized_pnl)}">${esc(sol(bt.realized_pnl))}</b></div>
+          <div class="card"><span>Unrealized</span><b class="${pnlClass(bt.unrealized_pnl)}">${esc(sol(bt.unrealized_pnl))}</b></div>
+          <div class="card"><span>Total PnL</span><b class="${pnlClass(bt.total_pnl)}">${esc(sol(bt.total_pnl))}</b></div>
+          <div class="card"><span>W / L / Trades</span><b>${esc(`${bt.wins ?? 0} / ${bt.losses ?? 0} / ${bt.trades ?? 0}`)}</b></div>
+          <div class="card"><span>Fees</span><b>${esc(sol(bt.fees_total, false))}</b></div>
         </div>
         <div class="chart-panel">
           <div class="chart-toolbar">
             <select id="interval">${intervals}</select>
             <button class="chip ${showPivots ? "on" : ""}" id="pivotToggle" type="button">Pivot</button>
+            <button class="chip ${showAcceptedOpposites ? "on" : ""}" id="acceptedOppositeToggle" type="button" title="First opposite pivot that passes all filters and locks the preceding pivot">Accepted opposite</button>
             <button class="chip ${showSwingLine ? "on" : ""}" id="swingLineToggle" type="button">Line</button>
             <button class="chip ${showKama ? "on" : ""}" id="kamaToggle" type="button">KAMA</button>
+            <button class="chip ${showTrades ? "on" : ""}" id="tradeToggle" type="button">Buy/Sell</button>
             <span class="chart-bias" id="chartBias"></span>
           </div>
           <div class="chart-params" id="structureParams">
             <div class="chart-param-group">
               <label class="chart-param">ATR <input id="pAtrPeriod" type="number" min="1" step="1"></label>
-              <label class="chart-param">× <input id="pAtrMult" type="number" min="0" step="0.1"></label>
-              <label class="chart-param">min <input id="pAtrMinPct" type="number" min="0" step="0.0001"></label>
+              <label class="chart-param" title="Reversal from pivot high/low to confirming close, in ATR units; 0 disables">pivot × <input id="pPivotAtrMult" type="number" min="0" step="0.1"></label>
             </div>
             <div class="chart-param-group">
               <label class="chart-param">min price <input id="pMinPriceDist" type="number" min="0" step="0.001"></label>
@@ -600,8 +639,10 @@ _PAGE_HTML = """<!DOCTYPE html>
         if (token) loadCurve(token);
       });
       bindOverlayToggle("pivotToggle", () => { showPivots = !showPivots; });
+      bindOverlayToggle("acceptedOppositeToggle", () => { showAcceptedOpposites = !showAcceptedOpposites; });
       bindOverlayToggle("swingLineToggle", () => { showSwingLine = !showSwingLine; });
       bindOverlayToggle("kamaToggle", () => { showKama = !showKama; });
+      bindOverlayToggle("tradeToggle", () => { showTrades = !showTrades; });
       fillStructureInputs();
       let paramTimer = null;
       document.querySelectorAll("#structureParams input").forEach(input => {
@@ -629,8 +670,7 @@ _PAGE_HTML = """<!DOCTYPE html>
     function fillStructureInputs() {
       const set = (id, value) => { const el = $(id); if (el) el.value = value; };
       set("pAtrPeriod", ATR_PERIOD);
-      set("pAtrMult", ATR_MULT);
-      set("pAtrMinPct", ATR_MIN_PCT);
+      set("pPivotAtrMult", PIVOT_ATR_MULT);
       set("pMinPriceDist", MIN_PRICE_DISTANCE);
       set("pMinBars", MIN_BAR_DISTANCE);
       set("pKamaPeriod", KAMA_PERIOD);
@@ -648,8 +688,7 @@ _PAGE_HTML = """<!DOCTYPE html>
 
     function onStructureParamChange(normalize) {
       ATR_PERIOD = Math.max(1, Math.round(readNum("pAtrPeriod", ATR_PERIOD, 1)));
-      ATR_MULT = Math.max(0, readNum("pAtrMult", ATR_MULT, 0));
-      ATR_MIN_PCT = Math.max(0, readNum("pAtrMinPct", ATR_MIN_PCT, 0));
+      PIVOT_ATR_MULT = readNum("pPivotAtrMult", PIVOT_ATR_MULT, 0);
       MIN_PRICE_DISTANCE = Math.max(0, readNum("pMinPriceDist", MIN_PRICE_DISTANCE, 0));
       MIN_BAR_DISTANCE = Math.max(0, Math.round(readNum("pMinBars", MIN_BAR_DISTANCE, 0)));
       KAMA_PERIOD = Math.max(1, Math.round(readNum("pKamaPeriod", KAMA_PERIOD, 1)));
@@ -661,11 +700,21 @@ _PAGE_HTML = """<!DOCTYPE html>
       if (tvChart) applyStructure((chartData && chartData.points) || []);
     }
 
+    function setChartEmpty(text) {
+      const empty = $("chartEmpty");
+      if (!empty) return;
+      if (!text) {
+        empty.hidden = true;
+        return;
+      }
+      empty.hidden = false;
+      empty.textContent = text;
+    }
+
     async function loadCurve(token) {
       if (chartAbort) chartAbort.abort();
       chartAbort = new AbortController();
-      const empty = $("chartEmpty");
-      if (empty) { empty.hidden = false; empty.textContent = "Loading chart..."; }
+      if (!tvChart) setChartEmpty("Loading chart...");
       const qs = new URLSearchParams({ address: token.address, interval: chartInterval });
       if (chartWallet) qs.set("wallet", chartWallet);
       else if (token.wallet) qs.set("wallet", token.wallet);
@@ -677,18 +726,22 @@ _PAGE_HTML = """<!DOCTYPE html>
         if (!res.ok) throw new Error("missing");
         overviewData = await res.json();
         chartData = overviewData;
+        meTrades = overviewData.me || [];
         const points = chartData.points || [];
-        if (empty) {
-          empty.hidden = !!points.length;
-          if (!points.length) empty.textContent = "No candles in this range.";
+        if (!points.length) {
+          destroyChart();
+          setChartEmpty("No candles in this range.");
+          return;
         }
+        setChartEmpty(null);
         drawChart(true);
       } catch (err) {
         if (err.name === "AbortError") return;
         chartData = null;
         overviewData = null;
+        meTrades = [];
         destroyChart();
-        if (empty) { empty.hidden = false; empty.textContent = "Could not load OHLCV."; }
+        setChartEmpty("Could not load OHLCV.");
       }
     }
 
@@ -802,7 +855,7 @@ _PAGE_HTML = """<!DOCTYPE html>
       return "neutral";
     }
 
-    function detectPivots(rows, left, right) {
+    function detectPivots(rows, left, right, atr = wilderAtr(rows, ATR_PERIOD)) {
       const pivots = [];
       for (let i = left + right; i < rows.length; i++) {
         const mid = i - right;
@@ -810,35 +863,47 @@ _PAGE_HTML = """<!DOCTYPE html>
         let isHigh = true, isLow = true;
         for (let j = mid - left; j <= mid + right; j++) {
           if (j === mid) continue;
-          if (rows[j].h >= high) isHigh = false;
-          if (rows[j].l <= low) isLow = false;
+          if (rows[j].h > high || (j > mid && rows[j].h === high)) isHigh = false;
+          if (rows[j].l < low || (j > mid && rows[j].l === low)) isLow = false;
           if (!isHigh && !isLow) break;
         }
-        if (isHigh === isLow) continue;
-        pivots.push({ i, t: rows[i].t, price: rows[i].c, kind: isHigh ? "high" : "low" });
+        if (PIVOT_ATR_MULT > 0) {
+          if (atr[i] == null) continue;
+          const threshold = atr[i] * PIVOT_ATR_MULT;
+          isHigh = isHigh && high - rows[i].c >= threshold;
+          isLow = isLow && rows[i].c - low >= threshold;
+        }
+        if (!isHigh && !isLow) continue;
+        pivots.push({ i, t: rows[mid].t, price: rows[mid].c, kind: isHigh && isLow ? "both" : (isHigh ? "high" : "low") });
       }
       return pivots;
     }
 
-    function filterPivots(raw, rows, atr, atrMult) {
+    function filterPivots(raw, acceptedOpposites = []) {
       const out = [];
-      for (const pivot of raw) {
-        const price = Math.abs(pivot.price) || Math.abs(rows[pivot.i].c) || 0;
-        const confirmI = Math.min(pivot.i, rows.length - 1);
-        const noise = Math.max(lastAtr(atr, confirmI) * atrMult, price * ATR_MIN_PCT);
+      for (const candidate of raw) {
+        const previous = out[out.length - 1];
+        const pivot = candidate.kind === "both"
+          ? { ...candidate, kind: previous && previous.kind === "high" ? "low" : "high" }
+          : candidate;
+        const price = Math.abs(pivot.price) || 0;
         if (!out.length) { out.push(pivot); continue; }
         const last = out[out.length - 1];
         if (pivot.kind === last.kind) {
-          if (pivot.kind === "high" && pivot.price >= last.price) out[out.length - 1] = pivot;
-          else if (pivot.kind === "low" && pivot.price <= last.price) out[out.length - 1] = pivot;
+          const replaces = pivot.kind === "high" ? pivot.price >= last.price : pivot.price <= last.price;
+          if (replaces) {
+            out[out.length - 1] = pivot;
+          }
           continue;
         }
-        const move = Math.abs(pivot.price - last.price);
+        const move = pivot.kind === "low" ? last.price - pivot.price : pivot.price - last.price;
+        if (move <= 0) continue;
         const base = Math.abs(last.price) || price;
         if (MIN_PRICE_DISTANCE > 0 && base && (move / base) <= MIN_PRICE_DISTANCE) continue;
         if (MIN_BAR_DISTANCE > 0 && (pivot.i - last.i) < MIN_BAR_DISTANCE) continue;
-        if (move < noise) continue;
         out.push(pivot);
+        // Preserve the original accepted opposite even if this swing is replaced.
+        acceptedOpposites.push({ ...pivot });
       }
       return out;
     }
@@ -866,11 +931,12 @@ _PAGE_HTML = """<!DOCTYPE html>
 
     function analyzeStructure(points) {
       const rows = structureRows(points);
-      const empty = { pivots: [], events: [], kama: [], trend: "neutral", kama_filter: "neutral", last_high: null, last_low: null };
-      if (rows.length < PIVOT_LEFT + PIVOT_RIGHT + 2) return empty;
+      const empty = { pivots: [], accepted_opposites: [], events: [], kama: [], trend: "neutral", kama_filter: "neutral", last_high: null, last_low: null };
+      if (rows.length < PIVOT_LEFT + PIVOT_RIGHT + 1) return empty;
       const atr = wilderAtr(rows, ATR_PERIOD);
       const kama = kamaValues(rows, KAMA_PERIOD, KAMA_FAST, KAMA_SLOW);
-      const swings = filterPivots(detectPivots(rows, PIVOT_LEFT, PIVOT_RIGHT), rows, atr, ATR_MULT);
+      const acceptedOpposites = [];
+      const swings = filterPivots(detectPivots(rows, PIVOT_LEFT, PIVOT_RIGHT, atr), acceptedOpposites);
       classifyPivots(swings);
       const confirmAt = new Map();
       for (const pivot of swings) {
@@ -916,6 +982,7 @@ _PAGE_HTML = """<!DOCTYPE html>
       const last = rows.length - 1;
       return {
         pivots: swings.map(pub),
+        accepted_opposites: acceptedOpposites.map(pub),
         events,
         kama: kama.map((value, i) => value == null ? null : ({ t: rows[i].t, value })).filter(Boolean),
         trend,
@@ -925,7 +992,22 @@ _PAGE_HTML = """<!DOCTYPE html>
       };
     }
 
-    function structureMarkers(s) {
+    function chartTradeMarks(points) {
+      // Never let trades outside candle data snap onto an edge candle.
+      const times = new Set(points.map(p => p.t));
+      const step = { "15s": 15, "1m": 60, "5m": 300, "15m": 900 }[chartInterval] || 60;
+      const marks = [];
+      for (const mark of meTrades) {
+        if (!mark || !Number.isFinite(mark.t)) continue;
+        if (mark.side !== "buy" && mark.side !== "sell") continue;
+        const time = times.has(mark.t) ? mark.t : Math.floor(mark.t / step) * step;
+        if (!times.has(time)) continue;
+        marks.push({ ...mark, t: time });
+      }
+      return marks;
+    }
+
+    function structureMarkers(s, trades) {
       const markers = [];
       const seen = new Set();
       const add = (item) => {
@@ -933,18 +1015,49 @@ _PAGE_HTML = """<!DOCTYPE html>
         seen.add(item.time);
         markers.push(item);
       };
-      if (!showPivots) return markers;
-      for (const p of s.pivots) {
-        const high = p.kind === "high";
-        const bull = p.label === "HH" || p.label === "HL" || p.label === "H";
-        add({
+      const seenTrades = new Set();
+      for (const p of showTrades ? trades : []) {
+        if (!p) continue;
+        const buy = p.side === "buy";
+        const position = buy ? "belowBar" : "aboveBar";
+        const color = buy ? "#22c55e" : "#ef4444";
+        const key = `${p.t}:${p.side}`;
+        if (seenTrades.has(key)) continue;
+        seenTrades.add(key);
+        markers.push({
           time: p.t,
-          position: high ? "aboveBar" : "belowBar",
-          color: bull ? "#5ee9a4" : "#ff7a8a",
-          shape: high ? "arrowDown" : "arrowUp",
-          text: p.label || "",
+          position,
+          color,
+          shape: "circle",
+          text: buy ? "BUY" : "SELL",
           size: 2,
         });
+      }
+      if (showPivots) {
+        for (const p of s.pivots || []) {
+          const high = p.kind === "high";
+          const bull = p.label === "HH" || p.label === "HL" || p.label === "H";
+          add({
+            time: p.t,
+            position: high ? "aboveBar" : "belowBar",
+            color: bull ? "#5ee9a4" : "#ff7a8a",
+            shape: high ? "arrowDown" : "arrowUp",
+            text: p.label || "",
+            size: 2,
+          });
+        }
+      }
+      if (showAcceptedOpposites) {
+        for (const p of s.accepted_opposites || []) {
+          markers.push({
+            time: p.t,
+            position: p.kind === "high" ? "aboveBar" : "belowBar",
+            color: "#fbbf24",
+            shape: "square",
+            text: p.kind === "high" ? "Accepted H" : "Accepted L",
+            size: 1,
+          });
+        }
       }
       markers.sort((a, b) => a.time - b.time);
       return markers;
@@ -964,7 +1077,8 @@ _PAGE_HTML = """<!DOCTYPE html>
     function applyStructure(points) {
       try {
         if (!candleSeries) return;
-        if (!showPivots && !showSwingLine && !showKama) {
+        const trades = chartTradeMarks(points);
+        if (!showPivots && !showAcceptedOpposites && !showSwingLine && !showKama && !(showTrades && trades.length)) {
           if (candleSeries.setMarkers) candleSeries.setMarkers([]);
           if (lineSeries) lineSeries.applyOptions({ visible: false });
           if (swingSeries) swingSeries.applyOptions({ visible: false });
@@ -972,7 +1086,7 @@ _PAGE_HTML = """<!DOCTYPE html>
           return;
         }
         const s = analyzeStructure(points);
-        if (candleSeries.setMarkers) candleSeries.setMarkers(structureMarkers(s));
+        if (candleSeries.setMarkers) candleSeries.setMarkers(structureMarkers(s, trades));
         if (lineSeries) {
           lineSeries.setData(s.kama.map(p => ({ time: p.t, value: p.value })));
           lineSeries.applyOptions({

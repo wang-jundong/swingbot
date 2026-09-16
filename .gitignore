@@ -3,6 +3,7 @@ __pycache__
 build/
 dist/
 var/
+tests/
 .env
 src/config/bindings/
 ecosystem.config.js

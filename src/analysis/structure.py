@@ -1,11 +1,10 @@
-"""Market-structure labels: pivots, ATR filter, HH/HL/LH/LL, KAMA, BOS/CHoCH."""
+"""Market-structure labels: pivots, HH/HL/LH/LL, KAMA, BOS/CHoCH."""
 
 from __future__ import annotations
 
 from src.config.structure import (
-    ATR_MIN_PCT,
-    ATR_MULT,
     ATR_PERIOD,
+    PIVOT_ATR_MULT,
     KAMA_FAST,
     KAMA_FLAT_ATR,
     KAMA_PERIOD,
@@ -34,8 +33,8 @@ def analyze_structure(candles: list[dict]) -> dict:
 
     atr = _wilder_atr(candles, ATR_PERIOD)
     kama = _kama(candles, KAMA_PERIOD, KAMA_FAST, KAMA_SLOW)
-    raw = _detect_pivots(candles, PIVOT_LEFT, PIVOT_RIGHT)
-    swings = _filter_pivots(raw, candles, atr, ATR_MULT)
+    raw = _detect_pivots(candles, PIVOT_LEFT, PIVOT_RIGHT, atr)
+    swings = _filter_pivots(raw)
     _classify(swings)
 
     confirm_at: dict[int, list[dict]] = {}
@@ -96,7 +95,21 @@ def analyze_structure(candles: list[dict]) -> dict:
     }
 
 
-def _detect_pivots(candles: list[dict], left: int, right: int) -> list[dict]:
+def _pivot_atr_sides(is_high: bool, is_low: bool, high: float, low: float,
+                     close: float, atr: float | None) -> tuple[bool, bool]:
+    """Filter each candidate side using reversal at the confirmation close."""
+    if PIVOT_ATR_MULT <= 0:
+        return is_high, is_low
+    if atr is None:
+        return False, False
+    threshold = atr * PIVOT_ATR_MULT
+    return is_high and high - close >= threshold, is_low and close - low >= threshold
+
+
+def _detect_pivots(candles: list[dict], left: int, right: int,
+                   atr: list[float | None] | None = None) -> list[dict]:
+    if atr is None:
+        atr = _wilder_atr(candles, ATR_PERIOD)
     pivots: list[dict] = []
     for i in range(left + right, len(candles)):
         mid = i - right
@@ -107,32 +120,38 @@ def _detect_pivots(candles: list[dict], left: int, right: int) -> list[dict]:
         for j in range(mid - left, mid + right + 1):
             if j == mid:
                 continue
-            if candles[j]["h"] >= high:
+            if candles[j]["h"] > high or (j > mid and candles[j]["h"] == high):
                 is_high = False
-            if candles[j]["l"] <= low:
+            if candles[j]["l"] < low or (j > mid and candles[j]["l"] == low):
                 is_low = False
             if not is_high and not is_low:
                 break
-        if is_high == is_low:
+        is_high, is_low = _pivot_atr_sides(
+            is_high, is_low, high, low, candles[i]["c"], atr[i]
+        )
+        if not is_high and not is_low:
             continue
         pivots.append({
             "i": i,
-            "t": candles[i]["t"],
-            "price": candles[i]["c"],
-            "kind": "high" if is_high else "low",
+            "t": candles[mid]["t"],
+            "price": candles[mid]["c"],
+            "kind": "both" if is_high and is_low else ("high" if is_high else "low"),
         })
     return pivots
 
 
-def _filter_pivots(
-    raw: list[dict],
-    candles: list[dict],
-    atr: list[float | None],
-    atr_mult: float,
-) -> list[dict]:
+def _resolve_pivot(pivot: dict, last: dict | None) -> dict:
+    """Resolve an outside candle against accepted history, without mutating raw data."""
+    if pivot["kind"] != "both":
+        return pivot
+    kind = "low" if last and last["kind"] == "high" else "high"
+    return {**pivot, "kind": kind}
+
+
+def _filter_pivots(raw: list[dict]) -> list[dict]:
     out: list[dict] = []
     for pivot in raw:
-        noise = _noise_floor(pivot, candles, atr, atr_mult)
+        pivot = _resolve_pivot(pivot, out[-1] if out else None)
         if not out:
             out.append(pivot)
             continue
@@ -143,32 +162,21 @@ def _filter_pivots(
             elif pivot["kind"] == "low" and pivot["price"] <= last["price"]:
                 out[-1] = pivot
             continue
-        move = abs(pivot["price"] - last["price"])
+        # Opposite pivots must move in the expected direction.
+        move = (
+            last["price"] - pivot["price"]
+            if pivot["kind"] == "low"
+            else pivot["price"] - last["price"]
+        )
+        if move <= 0:
+            continue
         base = abs(last["price"]) or abs(pivot["price"]) or 0.0
         if MIN_PRICE_DISTANCE > 0 and base and (move / base) <= MIN_PRICE_DISTANCE:
             continue
         if MIN_BAR_DISTANCE > 0 and (pivot["i"] - last["i"]) < MIN_BAR_DISTANCE:
             continue
-        if move < noise:
-            continue
         out.append(pivot)
     return out
-
-
-def _noise_floor(
-    pivot: dict,
-    candles: list[dict],
-    atr: list[float | None],
-    atr_mult: float,
-) -> float:
-    confirm_i = min(pivot["i"], len(candles) - 1)
-    value = None
-    for j in range(confirm_i, -1, -1):
-        if atr[j] is not None:
-            value = atr[j]
-            break
-    price = abs(pivot["price"]) or abs(candles[pivot["i"]]["c"]) or 0.0
-    return max((value or 0.0) * atr_mult, price * ATR_MIN_PCT)
 
 
 def _classify(pivots: list[dict]) -> None:

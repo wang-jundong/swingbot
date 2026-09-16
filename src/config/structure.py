@@ -1,15 +1,14 @@
 """Market-structure detection parameters."""
 
 # 1-left / 1-right, confirmed when candle i closes:
-# high: High[i-1] > High[i-2] and High[i-1] > High[i]
-# low:  Low[i-1]  < Low[i-2]  and Low[i-1]  < Low[i]
-# The mark is printed on candle i at Close[i].
+# high: High[i-1] >= High[i-2] and High[i-1] > High[i]
+# low:  Low[i-1] <= Low[i-2]  and Low[i-1]  < Low[i]
+# The mark is printed on the swing candle (i-1) at Close[i-1].
 PIVOT_LEFT = 1
 PIVOT_RIGHT = 1
 ATR_PERIOD = 14
-ATR_MULT = 2
-ATR_MIN_PCT = 0.001
-MIN_PRICE_DISTANCE = 0.1
+PIVOT_ATR_MULT = 1.0  # Confirming-close reversal from pivot high/low; 0 disables.
+MIN_PRICE_DISTANCE = 0.1  # Required directional move: high to low down, low to high up.
 MIN_BAR_DISTANCE = 30
 KAMA_PERIOD = 10
 KAMA_FAST = 2
@@ -23,8 +22,7 @@ def as_dict() -> dict:
         "PIVOT_LEFT": PIVOT_LEFT,
         "PIVOT_RIGHT": PIVOT_RIGHT,
         "ATR_PERIOD": ATR_PERIOD,
-        "ATR_MULT": ATR_MULT,
-        "ATR_MIN_PCT": ATR_MIN_PCT,
+        "PIVOT_ATR_MULT": PIVOT_ATR_MULT,
         "MIN_PRICE_DISTANCE": MIN_PRICE_DISTANCE,
         "MIN_BAR_DISTANCE": MIN_BAR_DISTANCE,
         "KAMA_PERIOD": KAMA_PERIOD,

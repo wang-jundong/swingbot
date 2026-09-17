@@ -1,13 +1,14 @@
-"""Causal bar walk of pivots, KAMA filter, and BOS/CHoCH."""
+"""Causal bar walk of pivots, swing trend, and KAMA filter."""
 
 from __future__ import annotations
 
 from src.analysis.structure import (
-    _event,
+    _detect_kama_pivots,
     _pivot_atr_sides,
     _resolve_pivot,
     _kama,
     _kama_filter,
+    _public_kama_pivot,
     _public_pivot,
     _trend_after,
     _wilder_atr,
@@ -31,54 +32,38 @@ def walk_bars(candles: list[dict]) -> list[dict]:
 
     atr = _wilder_atr(candles, ATR_PERIOD)
     kama = _kama(candles, KAMA_PERIOD, KAMA_FAST, KAMA_SLOW)
+    kama_pivots = _detect_kama_pivots(
+        candles, kama, PIVOT_LEFT, PIVOT_RIGHT, atr
+    )
+    kama_pivots_at = {pivot["i"]: pivot for pivot in kama_pivots}
     filtered: list[dict] = []
+    filtered_kama: list[dict] = []
     trend = "neutral"
     last_high = None
     last_low = None
-    high_broken = False
-    low_broken = False
     snapshots: list[dict] = []
 
     for i, row in enumerate(candles):
         accepted = _accept_pivot(filtered, _pivot_at(candles, i, atr))
-        events: list[dict] = []
+        accepted_kama = _accept_pivot(filtered_kama, kama_pivots_at.get(i))
         if accepted is not None and accepted["i"] == i:
             if accepted["kind"] == "high":
                 last_high = accepted
-                high_broken = False
             else:
                 last_low = accepted
-                low_broken = False
             trend = _trend_after(trend, last_high, last_low)
 
         bias = _kama_filter(row["c"], kama, atr, i)
         close = row["c"]
-        if trend == "bullish":
-            if last_high and not high_broken and close > last_high["price"]:
-                if bias != "bearish":
-                    events.append(_event(row, "BOS", "bull"))
-                high_broken = True
-            if last_low and not low_broken and close < last_low["price"]:
-                events.append(_event(row, "CHoCH", "bear"))
-                low_broken = True
-                trend = "bearish"
-        elif trend == "bearish":
-            if last_low and not low_broken and close < last_low["price"]:
-                if bias != "bullish":
-                    events.append(_event(row, "BOS", "bear"))
-                low_broken = True
-            if last_high and not high_broken and close > last_high["price"]:
-                events.append(_event(row, "CHoCH", "bull"))
-                high_broken = True
-                trend = "bullish"
-
         snapshots.append({
             "i": i,
             "t": row["t"],
             "open": row["o"],
             "close": close,
-            "events": events,
             "trend": trend,
+            "kama_pivots": (
+                [_public_kama_pivot(accepted_kama)] if accepted_kama else []
+            ),
             "kama_filter": bias,
             "last_high": _public_pivot(last_high) if last_high else None,
             "last_low": _public_pivot(last_low) if last_low else None,
@@ -154,7 +139,7 @@ def _accept_pivot(
     base = abs(last["price"]) or abs(pivot["price"]) or 0.0
     if MIN_PRICE_DISTANCE > 0 and base and (move / base) <= MIN_PRICE_DISTANCE:
         return None
-    if MIN_BAR_DISTANCE > 0 and (pivot["i"] - last["i"]) < MIN_BAR_DISTANCE:
+    if pivot["kind"] == "low" and MIN_BAR_DISTANCE > 0 and (pivot["i"] - last["i"]) < MIN_BAR_DISTANCE:
         return None
     _label(pivot, _prior_same(filtered, pivot["kind"]))
     filtered.append(pivot)

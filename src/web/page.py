@@ -325,6 +325,8 @@ _PAGE_HTML = """<!DOCTYPE html>
     let showAcceptedOpposites = true;
     let showSwingLine = true;
     let showKama = true;
+    let showKamaPivots = true;
+    let showKamaAcceptedOpposites = true;
     let showTrades = true;
     let ignoreRange = false;
     let rangeTimer = null;
@@ -337,6 +339,7 @@ _PAGE_HTML = """<!DOCTYPE html>
     const PIVOT_RIGHT = STRUCTURE_DEFAULTS.PIVOT_RIGHT;
     let ATR_PERIOD = STRUCTURE_DEFAULTS.ATR_PERIOD;
     let PIVOT_ATR_MULT = STRUCTURE_DEFAULTS.PIVOT_ATR_MULT;
+    let KAMA_PIVOT_ATR_MULT = STRUCTURE_DEFAULTS.KAMA_PIVOT_ATR_MULT;
     let MIN_PRICE_DISTANCE = STRUCTURE_DEFAULTS.MIN_PRICE_DISTANCE;
     let MIN_BAR_DISTANCE = STRUCTURE_DEFAULTS.MIN_BAR_DISTANCE;
     let KAMA_PERIOD = STRUCTURE_DEFAULTS.KAMA_PERIOD;
@@ -602,6 +605,8 @@ _PAGE_HTML = """<!DOCTYPE html>
             <button class="chip ${showAcceptedOpposites ? "on" : ""}" id="acceptedOppositeToggle" type="button" title="First opposite pivot that passes all filters and locks the preceding pivot">Accepted opposite</button>
             <button class="chip ${showSwingLine ? "on" : ""}" id="swingLineToggle" type="button">Line</button>
             <button class="chip ${showKama ? "on" : ""}" id="kamaToggle" type="button">KAMA</button>
+            <button class="chip ${showKamaPivots ? "on" : ""}" id="kamaPivotToggle" type="button">KAMA Pivot</button>
+            <button class="chip ${showKamaAcceptedOpposites ? "on" : ""}" id="kamaAcceptedOppositeToggle" type="button" title="First opposite KAMA pivot that passes all filters and locks the preceding KAMA pivot">KAMA Accepted opposite</button>
             <button class="chip ${showTrades ? "on" : ""}" id="tradeToggle" type="button">Buy/Sell</button>
             <span class="chart-bias" id="chartBias"></span>
           </div>
@@ -618,6 +623,7 @@ _PAGE_HTML = """<!DOCTYPE html>
               <label class="chart-param">KAMA <input id="pKamaPeriod" type="number" min="1" step="1"></label>
               <label class="chart-param">fast <input id="pKamaFast" type="number" min="1" step="1"></label>
               <label class="chart-param">slow <input id="pKamaSlow" type="number" min="1" step="1"></label>
+              <label class="chart-param" title="KAMA pivot reversal to confirming candle close, in ATR units; 0 disables">pivot × <input id="pKamaPivotAtrMult" type="number" min="0" step="0.1"></label>
               <label class="chart-param">slope <input id="pKamaSlope" type="number" min="1" step="1"></label>
               <label class="chart-param">flat <input id="pKamaFlat" type="number" min="0" step="0.01"></label>
             </div>
@@ -642,6 +648,8 @@ _PAGE_HTML = """<!DOCTYPE html>
       bindOverlayToggle("acceptedOppositeToggle", () => { showAcceptedOpposites = !showAcceptedOpposites; });
       bindOverlayToggle("swingLineToggle", () => { showSwingLine = !showSwingLine; });
       bindOverlayToggle("kamaToggle", () => { showKama = !showKama; });
+      bindOverlayToggle("kamaPivotToggle", () => { showKamaPivots = !showKamaPivots; });
+      bindOverlayToggle("kamaAcceptedOppositeToggle", () => { showKamaAcceptedOpposites = !showKamaAcceptedOpposites; });
       bindOverlayToggle("tradeToggle", () => { showTrades = !showTrades; });
       fillStructureInputs();
       let paramTimer = null;
@@ -671,6 +679,7 @@ _PAGE_HTML = """<!DOCTYPE html>
       const set = (id, value) => { const el = $(id); if (el) el.value = value; };
       set("pAtrPeriod", ATR_PERIOD);
       set("pPivotAtrMult", PIVOT_ATR_MULT);
+      set("pKamaPivotAtrMult", KAMA_PIVOT_ATR_MULT);
       set("pMinPriceDist", MIN_PRICE_DISTANCE);
       set("pMinBars", MIN_BAR_DISTANCE);
       set("pKamaPeriod", KAMA_PERIOD);
@@ -689,6 +698,7 @@ _PAGE_HTML = """<!DOCTYPE html>
     function onStructureParamChange(normalize) {
       ATR_PERIOD = Math.max(1, Math.round(readNum("pAtrPeriod", ATR_PERIOD, 1)));
       PIVOT_ATR_MULT = readNum("pPivotAtrMult", PIVOT_ATR_MULT, 0);
+      KAMA_PIVOT_ATR_MULT = readNum("pKamaPivotAtrMult", KAMA_PIVOT_ATR_MULT, 0);
       MIN_PRICE_DISTANCE = Math.max(0, readNum("pMinPriceDist", MIN_PRICE_DISTANCE, 0));
       MIN_BAR_DISTANCE = Math.max(0, Math.round(readNum("pMinBars", MIN_BAR_DISTANCE, 0)));
       KAMA_PERIOD = Math.max(1, Math.round(readNum("pKamaPeriod", KAMA_PERIOD, 1)));
@@ -855,6 +865,42 @@ _PAGE_HTML = """<!DOCTYPE html>
       return "neutral";
     }
 
+    function detectKamaPivots(rows, kama, left, right, atr) {
+      const pivots = [];
+      const size = Math.min(rows.length, kama.length);
+      for (let i = left + right; i < size; i++) {
+        const mid = i - right;
+        const value = kama[mid];
+        if (value == null) continue;
+        let isHigh = true, isLow = true;
+        for (let j = mid - left; j <= mid + right; j++) {
+          if (j === mid) continue;
+          const other = kama[j];
+          if (other == null) { isHigh = false; isLow = false; break; }
+          if (other > value || (j > mid && other === value)) isHigh = false;
+          if (other < value || (j > mid && other === value)) isLow = false;
+          if (!isHigh && !isLow) break;
+        }
+        if (!isHigh && !isLow) continue;
+        if (KAMA_PIVOT_ATR_MULT > 0) {
+          if (atr[i] == null) continue;
+          const threshold = atr[i] * KAMA_PIVOT_ATR_MULT;
+          isHigh = isHigh && value - rows[i].c >= threshold;
+          isLow = isLow && rows[i].c - value >= threshold;
+        }
+        if (!isHigh && !isLow) continue;
+        pivots.push({
+          i,
+          t: rows[mid].t,
+          value,
+          price: value,
+          kind: isHigh && isLow ? "both" : (isHigh ? "high" : "low"),
+        });
+      }
+      return pivots;
+    }
+
+
     function detectPivots(rows, left, right, atr = wilderAtr(rows, ATR_PERIOD)) {
       const pivots = [];
       for (let i = left + right; i < rows.length; i++) {
@@ -900,7 +946,7 @@ _PAGE_HTML = """<!DOCTYPE html>
         if (move <= 0) continue;
         const base = Math.abs(last.price) || price;
         if (MIN_PRICE_DISTANCE > 0 && base && (move / base) <= MIN_PRICE_DISTANCE) continue;
-        if (MIN_BAR_DISTANCE > 0 && (pivot.i - last.i) < MIN_BAR_DISTANCE) continue;
+        if (pivot.kind === "low" && MIN_BAR_DISTANCE > 0 && (pivot.i - last.i) < MIN_BAR_DISTANCE) continue;
         out.push(pivot);
         // Preserve the original accepted opposite even if this swing is replaced.
         acceptedOpposites.push({ ...pivot });
@@ -931,10 +977,15 @@ _PAGE_HTML = """<!DOCTYPE html>
 
     function analyzeStructure(points) {
       const rows = structureRows(points);
-      const empty = { pivots: [], accepted_opposites: [], events: [], kama: [], trend: "neutral", kama_filter: "neutral", last_high: null, last_low: null };
+      const empty = { pivots: [], accepted_opposites: [], kama: [], kama_pivots: [], kama_accepted_opposites: [], trend: "neutral", kama_filter: "neutral", last_high: null, last_low: null };
       if (rows.length < PIVOT_LEFT + PIVOT_RIGHT + 1) return empty;
       const atr = wilderAtr(rows, ATR_PERIOD);
       const kama = kamaValues(rows, KAMA_PERIOD, KAMA_FAST, KAMA_SLOW);
+      const kamaAcceptedOpposites = [];
+      const kamaPivots = filterPivots(
+        detectKamaPivots(rows, kama, PIVOT_LEFT, PIVOT_RIGHT, atr),
+        kamaAcceptedOpposites
+      );
       const acceptedOpposites = [];
       const swings = filterPivots(detectPivots(rows, PIVOT_LEFT, PIVOT_RIGHT, atr), acceptedOpposites);
       classifyPivots(swings);
@@ -946,45 +997,21 @@ _PAGE_HTML = """<!DOCTYPE html>
       }
       let trend = "neutral";
       let lastHigh = null, lastLow = null;
-      let highBroken = false, lowBroken = false;
-      const events = [];
       const pub = (p) => p && ({ t: p.t, price: p.price, kind: p.kind, label: p.label });
       for (let i = 0; i < rows.length; i++) {
         for (const pivot of (confirmAt.get(i) || [])) {
-          if (pivot.kind === "high") { lastHigh = pivot; highBroken = false; }
-          else { lastLow = pivot; lowBroken = false; }
+          if (pivot.kind === "high") { lastHigh = pivot; }
+          else { lastLow = pivot; }
           trend = trendAfter(trend, lastHigh, lastLow);
-        }
-        const bias = kamaFilter(rows[i].c, kama, atr, i);
-        const close = rows[i].c;
-        if (trend === "bullish") {
-          if (lastHigh && !highBroken && close > lastHigh.price) {
-            if (bias !== "bearish") events.push({ t: rows[i].t, label: "BOS", kind: "bull" });
-            highBroken = true;
-          }
-          if (lastLow && !lowBroken && close < lastLow.price) {
-            events.push({ t: rows[i].t, label: "CHoCH", kind: "bear" });
-            lowBroken = true;
-            trend = "bearish";
-          }
-        } else if (trend === "bearish") {
-          if (lastLow && !lowBroken && close < lastLow.price) {
-            if (bias !== "bullish") events.push({ t: rows[i].t, label: "BOS", kind: "bear" });
-            lowBroken = true;
-          }
-          if (lastHigh && !highBroken && close > lastHigh.price) {
-            events.push({ t: rows[i].t, label: "CHoCH", kind: "bull" });
-            highBroken = true;
-            trend = "bullish";
-          }
         }
       }
       const last = rows.length - 1;
       return {
         pivots: swings.map(pub),
         accepted_opposites: acceptedOpposites.map(pub),
-        events,
         kama: kama.map((value, i) => value == null ? null : ({ t: rows[i].t, value })).filter(Boolean),
+        kama_pivots: kamaPivots.map(p => ({ t: p.t, value: p.value, kind: p.kind })),
+        kama_accepted_opposites: kamaAcceptedOpposites.map(p => ({ t: p.t, value: p.value, kind: p.kind })),
         trend,
         kama_filter: kamaFilter(rows[last].c, kama, atr, last),
         last_high: pub(lastHigh),
@@ -1052,7 +1079,7 @@ _PAGE_HTML = """<!DOCTYPE html>
           markers.push({
             time: p.t,
             position: p.kind === "high" ? "aboveBar" : "belowBar",
-            color: "#fbbf24",
+            color: p.kind === "high" ? "#fb923c" : "#fbbf24",
             shape: "square",
             text: p.kind === "high" ? "Accepted H" : "Accepted L",
             size: 1,
@@ -1069,9 +1096,36 @@ _PAGE_HTML = """<!DOCTYPE html>
       if (!s) { el.innerHTML = ""; return; }
       const trendCls = s.trend === "bullish" ? "pos" : s.trend === "bearish" ? "neg" : "";
       const kamaCls = s.kama_filter === "bullish" ? "pos" : s.kama_filter === "bearish" ? "neg" : "";
-      const lastEvent = s.events && s.events.length ? s.events[s.events.length - 1] : null;
-      const eventHtml = lastEvent ? ` · <b>${esc(lastEvent.label)}</b>` : "";
-      el.innerHTML = `Trend <b class="${trendCls}">${esc(s.trend)}</b> · KAMA <b class="${kamaCls}">${esc(s.kama_filter)}</b>${eventHtml}`;
+      el.innerHTML = `Trend <b class="${trendCls}">${esc(s.trend)}</b> · KAMA <b class="${kamaCls}">${esc(s.kama_filter)}</b>`;
+    }
+
+    function kamaPivotMarkers(s) {
+      if (!showKama) return [];
+      const markers = (showKamaPivots ? s.kama_pivots || [] : []).map(p => {
+        const high = p.kind === "high";
+        return {
+          time: p.t,
+          position: high ? "aboveBar" : "belowBar",
+          color: high ? "#f472b6" : "#a78bfa",
+          shape: high ? "arrowDown" : "arrowUp",
+          text: high ? "KAMA H" : "KAMA L",
+          size: 1,
+        };
+      });
+      if (showKamaAcceptedOpposites) {
+        for (const p of s.kama_accepted_opposites || []) {
+          markers.push({
+            time: p.t,
+            position: p.kind === "high" ? "aboveBar" : "belowBar",
+            color: p.kind === "high" ? "#22d3ee" : "#60a5fa",
+            shape: "square",
+            text: p.kind === "high" ? "KAMA Accepted H" : "KAMA Accepted L",
+            size: 1,
+          });
+        }
+      }
+      markers.sort((a, b) => a.time - b.time);
+      return markers;
     }
 
     function applyStructure(points) {
@@ -1089,6 +1143,7 @@ _PAGE_HTML = """<!DOCTYPE html>
         if (candleSeries.setMarkers) candleSeries.setMarkers(structureMarkers(s, trades));
         if (lineSeries) {
           lineSeries.setData(s.kama.map(p => ({ time: p.t, value: p.value })));
+          if (lineSeries.setMarkers) lineSeries.setMarkers(kamaPivotMarkers(s));
           lineSeries.applyOptions({
             visible: showKama,
             color: "#38bdf8",

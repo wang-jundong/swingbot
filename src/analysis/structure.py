@@ -1,10 +1,11 @@
-"""Market-structure labels: pivots, HH/HL/LH/LL, KAMA, BOS/CHoCH."""
+"""Market-structure labels: pivots, HH/HL/LH/LL, and KAMA."""
 
 from __future__ import annotations
 
 from src.config.structure import (
     ATR_PERIOD,
     PIVOT_ATR_MULT,
+    KAMA_PIVOT_ATR_MULT,
     KAMA_FAST,
     KAMA_FLAT_ATR,
     KAMA_PERIOD,
@@ -21,8 +22,8 @@ def analyze_structure(candles: list[dict]) -> dict:
     """Label swing structure on OHLC rows with keys t, o, h, l, c."""
     empty = {
         "pivots": [],
-        "events": [],
         "kama": [],
+        "kama_pivots": [],
         "trend": "neutral",
         "kama_filter": "neutral",
         "last_high": None,
@@ -33,6 +34,9 @@ def analyze_structure(candles: list[dict]) -> dict:
 
     atr = _wilder_atr(candles, ATR_PERIOD)
     kama = _kama(candles, KAMA_PERIOD, KAMA_FAST, KAMA_SLOW)
+    kama_pivots = _filter_pivots(_detect_kama_pivots(
+        candles, kama, PIVOT_LEFT, PIVOT_RIGHT, atr
+    ))
     raw = _detect_pivots(candles, PIVOT_LEFT, PIVOT_RIGHT, atr)
     swings = _filter_pivots(raw)
     _classify(swings)
@@ -44,50 +48,24 @@ def analyze_structure(candles: list[dict]) -> dict:
     trend = "neutral"
     last_high = None
     last_low = None
-    high_broken = False
-    low_broken = False
-    events: list[dict] = []
 
-    for i, row in enumerate(candles):
+    for i in range(len(candles)):
         for pivot in confirm_at.get(i, []):
             if pivot["kind"] == "high":
                 last_high = pivot
-                high_broken = False
             else:
                 last_low = pivot
-                low_broken = False
             trend = _trend_after(trend, last_high, last_low)
-
-        bias = _kama_filter(row["c"], kama, atr, i)
-        close = row["c"]
-        if trend == "bullish":
-            if last_high and not high_broken and close > last_high["price"]:
-                if bias != "bearish":
-                    events.append(_event(row, "BOS", "bull"))
-                high_broken = True
-            if last_low and not low_broken and close < last_low["price"]:
-                events.append(_event(row, "CHoCH", "bear"))
-                low_broken = True
-                trend = "bearish"
-        elif trend == "bearish":
-            if last_low and not low_broken and close < last_low["price"]:
-                if bias != "bullish":
-                    events.append(_event(row, "BOS", "bear"))
-                low_broken = True
-            if last_high and not high_broken and close > last_high["price"]:
-                events.append(_event(row, "CHoCH", "bull"))
-                high_broken = True
-                trend = "bullish"
 
     last_i = len(candles) - 1
     return {
         "pivots": [_public_pivot(p) for p in swings],
-        "events": events,
         "kama": [
             {"t": candles[i]["t"], "value": value}
             for i, value in enumerate(kama)
             if value is not None
         ],
+        "kama_pivots": [_public_kama_pivot(p) for p in kama_pivots],
         "trend": trend,
         "kama_filter": _kama_filter(candles[last_i]["c"], kama, atr, last_i),
         "last_high": _public_pivot(last_high) if last_high else None,
@@ -96,13 +74,16 @@ def analyze_structure(candles: list[dict]) -> dict:
 
 
 def _pivot_atr_sides(is_high: bool, is_low: bool, high: float, low: float,
-                     close: float, atr: float | None) -> tuple[bool, bool]:
+                     close: float, atr: float | None,
+                     multiplier: float | None = None) -> tuple[bool, bool]:
     """Filter each candidate side using reversal at the confirmation close."""
-    if PIVOT_ATR_MULT <= 0:
+    if multiplier is None:
+        multiplier = PIVOT_ATR_MULT
+    if multiplier <= 0:
         return is_high, is_low
     if atr is None:
         return False, False
-    threshold = atr * PIVOT_ATR_MULT
+    threshold = atr * multiplier
     return is_high and high - close >= threshold, is_low and close - low >= threshold
 
 
@@ -173,7 +154,7 @@ def _filter_pivots(raw: list[dict]) -> list[dict]:
         base = abs(last["price"]) or abs(pivot["price"]) or 0.0
         if MIN_PRICE_DISTANCE > 0 and base and (move / base) <= MIN_PRICE_DISTANCE:
             continue
-        if MIN_BAR_DISTANCE > 0 and (pivot["i"] - last["i"]) < MIN_BAR_DISTANCE:
+        if pivot["kind"] == "low" and MIN_BAR_DISTANCE > 0 and (pivot["i"] - last["i"]) < MIN_BAR_DISTANCE:
             continue
         out.append(pivot)
     return out
@@ -249,6 +230,57 @@ def _kama(candles: list[dict], period: int, fast: int, slow: int) -> list[float 
     return out
 
 
+def _detect_kama_pivots(
+    candles: list[dict],
+    kama: list[float | None],
+    left: int,
+    right: int,
+    atr: list[float | None] | None = None,
+) -> list[dict]:
+    """Return KAMA turns confirmed against the candle close and ATR."""
+    if atr is None:
+        atr = _wilder_atr(candles, ATR_PERIOD)
+    pivots: list[dict] = []
+    size = min(len(candles), len(kama))
+    for i in range(left + right, size):
+        mid = i - right
+        value = kama[mid]
+        if value is None:
+            continue
+        is_high = True
+        is_low = True
+        for j in range(mid - left, mid + right + 1):
+            if j == mid:
+                continue
+            other = kama[j]
+            if other is None:
+                is_high = False
+                is_low = False
+                break
+            if other > value or (j > mid and other == value):
+                is_high = False
+            if other < value or (j > mid and other == value):
+                is_low = False
+            if not is_high and not is_low:
+                break
+        if not is_high and not is_low:
+            continue
+        is_high, is_low = _pivot_atr_sides(
+            is_high, is_low, value, value, candles[i]["c"], atr[i],
+            KAMA_PIVOT_ATR_MULT,
+        )
+        if not is_high and not is_low:
+            continue
+        pivots.append({
+            "i": i,
+            "t": candles[mid]["t"],
+            "value": value,
+            "price": value,
+            "kind": "both" if is_high and is_low else ("high" if is_high else "low"),
+        })
+    return pivots
+
+
 def _kama_filter(
     price: float,
     kama: list[float | None],
@@ -275,14 +307,18 @@ def _kama_filter(
     return "neutral"
 
 
-def _event(row: dict, label: str, direction: str) -> dict:
-    return {"t": row["t"], "label": label, "kind": direction}
-
-
 def _public_pivot(pivot: dict) -> dict:
     return {
         "t": pivot["t"],
         "price": pivot["price"],
         "kind": pivot["kind"],
         "label": pivot.get("label"),
+    }
+
+
+def _public_kama_pivot(pivot: dict) -> dict:
+    return {
+        "t": pivot["t"],
+        "value": pivot["value"],
+        "kind": pivot["kind"],
     }

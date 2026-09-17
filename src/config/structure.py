@@ -7,9 +7,10 @@
 PIVOT_LEFT = 1
 PIVOT_RIGHT = 1
 ATR_PERIOD = 14
-PIVOT_ATR_MULT = 1.0  # Confirming-close reversal from pivot high/low; 0 disables.
-MIN_PRICE_DISTANCE = 0.1  # Required directional move: high to low down, low to high up.
-MIN_BAR_DISTANCE = 30
+PIVOT_ATR_MULT = 1.0  # Candle-pivot confirmation reversal in ATR units; 0 disables.
+KAMA_PIVOT_ATR_MULT = 0.2  # KAMA-pivot confirmation reversal in ATR units; 0 disables.
+MIN_PRICE_DISTANCE = 0.1  # Directional move required between accepted pivots.
+MIN_BAR_DISTANCE = 30  # Minimum bars from H to L only, for price and KAMA pivots.
 KAMA_PERIOD = 10
 KAMA_FAST = 2
 KAMA_SLOW = 30
@@ -23,6 +24,7 @@ def as_dict() -> dict:
         "PIVOT_RIGHT": PIVOT_RIGHT,
         "ATR_PERIOD": ATR_PERIOD,
         "PIVOT_ATR_MULT": PIVOT_ATR_MULT,
+        "KAMA_PIVOT_ATR_MULT": KAMA_PIVOT_ATR_MULT,
         "MIN_PRICE_DISTANCE": MIN_PRICE_DISTANCE,
         "MIN_BAR_DISTANCE": MIN_BAR_DISTANCE,
         "KAMA_PERIOD": KAMA_PERIOD,

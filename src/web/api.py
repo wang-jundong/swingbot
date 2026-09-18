@@ -1,6 +1,7 @@
 """JSON payloads for the OHLC curve dashboard."""
 
 from src.analysis.structure import analyze_structure
+from src.storage.wallet_trades import first_wallet_entry
 from src.backtest.stats import dashboard_stats, me_marks, mint_stats
 from src.integrations.birdeye import export_mint_ohlc
 from src.storage.ohlc import default_wallet, list_ohlc_tokens, list_wallets, ohlc_curve, safe_id
@@ -63,6 +64,19 @@ def ohlc_curve_payload(
 ) -> dict | None:
     payload = ohlc_curve(address, wallet, interval, time_from, time_to)
     if payload is not None:
+        entry = first_wallet_entry(payload["wallet"], payload["address"])
+        points = payload.get("points") or []
+        full_from, full_to = payload.get("full_from"), payload.get("full_to")
+        # Include earlier history when the default 8,000-bar cap hides the entry.
+        if (time_from is None and time_to is None and entry and points
+                and full_from is not None and full_to is not None
+                and full_from <= entry["t"] < points[0]["t"]):
+            expanded = ohlc_curve(
+                address, payload["wallet"], interval, full_from, full_to
+            )
+            if expanded is not None and expanded.get("points"):
+                payload = expanded
+        payload["target_wallet_first_entry"] = entry
         payload["structure"] = analyze_structure(payload.get("points") or [])
         payload["backtest"] = dashboard_stats(safe_id(wallet), safe_id(address))
         payload["me"] = me_marks(safe_id(wallet), safe_id(address))

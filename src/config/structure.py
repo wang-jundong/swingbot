@@ -7,9 +7,9 @@
 PIVOT_LEFT = 1
 PIVOT_RIGHT = 1
 ATR_PERIOD = 14
-PIVOT_ATR_MULT = 1.0  # Candle-pivot confirmation reversal in ATR units; 0 disables.
+PIVOT_ATR_MULT = 1  # Candle-pivot confirmation reversal in ATR units; 0 disables.
 KAMA_PIVOT_ATR_MULT = 0.2  # KAMA-pivot confirmation reversal in ATR units; 0 disables.
-MIN_PRICE_DISTANCE = 0.1  # Directional move required between accepted pivots.
+MIN_PRICE_DISTANCE = 0.18  # Directional move required between accepted pivots.
 MIN_BAR_DISTANCE = 30  # Minimum bars from H to L only, for price and KAMA pivots.
 KAMA_PERIOD = 10
 KAMA_FAST = 2

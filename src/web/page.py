@@ -324,9 +324,9 @@ _PAGE_HTML = """<!DOCTYPE html>
     let showPivots = true;
     let showAcceptedOpposites = true;
     let showSwingLine = true;
-    let showKama = true;
-    let showKamaPivots = true;
-    let showKamaAcceptedOpposites = true;
+    let showKama = false;
+    let showKamaPivots = false;
+    let showKamaAcceptedOpposites = false;
     let showTrades = true;
     let ignoreRange = false;
     let rangeTimer = null;
@@ -724,6 +724,9 @@ _PAGE_HTML = """<!DOCTYPE html>
     async function loadCurve(token) {
       if (chartAbort) chartAbort.abort();
       chartAbort = new AbortController();
+      if (detailAbort) detailAbort.abort();
+      clearTimeout(rangeTimer);
+      const request = chartAbort;
       if (!tvChart) setChartEmpty("Loading chart...");
       const qs = new URLSearchParams({ address: token.address, interval: chartInterval });
       if (chartWallet) qs.set("wallet", chartWallet);
@@ -734,7 +737,9 @@ _PAGE_HTML = """<!DOCTYPE html>
           signal: chartAbort.signal,
         });
         if (!res.ok) throw new Error("missing");
-        overviewData = await res.json();
+        const loaded = await res.json();
+        if (request !== chartAbort || request.signal.aborted) return;
+        overviewData = loaded;
         chartData = overviewData;
         meTrades = overviewData.me || [];
         const points = chartData.points || [];
@@ -756,6 +761,8 @@ _PAGE_HTML = """<!DOCTYPE html>
     }
 
     function destroyChart() {
+      const firstBuyLine = $("walletFirstBuyLine");
+      if (firstBuyLine) firstBuyLine.remove();
       if (tvChart) {
         tvChart.remove();
         tvChart = null;
@@ -1063,11 +1070,10 @@ _PAGE_HTML = """<!DOCTYPE html>
       if (showPivots) {
         for (const p of s.pivots || []) {
           const high = p.kind === "high";
-          const bull = p.label === "HH" || p.label === "HL" || p.label === "H";
           add({
             time: p.t,
             position: high ? "aboveBar" : "belowBar",
-            color: bull ? "#5ee9a4" : "#ff7a8a",
+            color: high ? "#ff7a8a" : "#5ee9a4",
             shape: high ? "arrowDown" : "arrowUp",
             text: p.label || "",
             size: 2,
@@ -1096,7 +1102,8 @@ _PAGE_HTML = """<!DOCTYPE html>
       if (!s) { el.innerHTML = ""; return; }
       const trendCls = s.trend === "bullish" ? "pos" : s.trend === "bearish" ? "neg" : "";
       const kamaCls = s.kama_filter === "bullish" ? "pos" : s.kama_filter === "bearish" ? "neg" : "";
-      el.innerHTML = `Trend <b class="${trendCls}">${esc(s.trend)}</b> · KAMA <b class="${kamaCls}">${esc(s.kama_filter)}</b>`;
+      el.innerHTML = `Trend <b class="${trendCls}">${esc(s.trend)}</b>`
+        + (showKama ? ` · KAMA <b class="${kamaCls}">${esc(s.kama_filter)}</b>` : "");
     }
 
     function kamaPivotMarkers(s) {
@@ -1180,6 +1187,51 @@ _PAGE_HTML = """<!DOCTYPE html>
         <span>${esc(when(p.time || p.t))}</span>`;
     }
 
+    function updateWalletFirstBuyLine() {
+      const host = $("chartStage");
+      if (!host || !tvChart) return;
+      let line = $("walletFirstBuyLine");
+      if (!line) {
+        line = document.createElement("div");
+        line.id = "walletFirstBuyLine";
+        line.style.cssText = "position:absolute;top:0;border-left:2px dashed #f8fafc;pointer-events:none;z-index:3;display:none";
+        const label = document.createElement("span");
+        label.textContent = "Target wallet first buy";
+        label.style.cssText = "position:absolute;top:8px;left:5px;white-space:nowrap;color:#f8fafc;background:#181c25;padding:3px 5px;font-size:11px";
+        line.appendChild(label);
+        host.appendChild(line);
+      }
+      line.style.display = "none";
+      const entry = chartData && chartData.target_wallet_first_entry;
+      const t = entry && entry.t;
+      if (entry) line.firstChild.textContent = `Target wallet first ${entry.side === "sell" ? "sell" : "buy"} · ${when(t)} (${LOCAL_TZ})`;
+      const points = (chartData && chartData.points) || [];
+      if (t == null || !points.length) return;
+      const step = { "15s": 15, "30s": 30, "1m": 60, "5m": 300, "15m": 900 }[chartInterval];
+      if (t < points[0].t || t >= points[points.length - 1].t + step) return;
+      const scale = tvChart.timeScale();
+      const index = points.findIndex(p => p.t > t);
+      const left = index < 0 ? points.length - 1 : index - 1;
+      if (left < 0) return;
+      const nextTime = index < 0 ? points[left].t + step : points[index].t;
+      const leftX = scale.timeToCoordinate(points[left].t);
+      if (leftX == null) return;
+      let rightX;
+      if (index >= 0) {
+        rightX = scale.timeToCoordinate(points[index].t);
+      } else {
+        const logical = scale.coordinateToLogical(leftX);
+        rightX = logical == null ? null : scale.logicalToCoordinate(logical + 1);
+      }
+      if (rightX == null) return;
+      const x = leftX + (rightX - leftX) * (t - points[left].t) / (nextTime - points[left].t);
+      if (!Number.isFinite(x) || x < 0 || x > scale.width()) return;
+      line.style.left = `${x}px`;
+      line.style.bottom = `${scale.height()}px`;
+      line.firstChild.style.transform = x > scale.width() - 160 ? "translateX(calc(-100% - 10px))" : "";
+      line.style.display = "block";
+    }
+
     function applyVisibleRange() {
       if (!tvChart) return;
       ignoreRange = true;
@@ -1200,6 +1252,8 @@ _PAGE_HTML = """<!DOCTYPE html>
       if (!Number.isFinite(span) || span <= 0) return;
       if (detailAbort) detailAbort.abort();
       detailAbort = new AbortController();
+      const request = detailAbort;
+      const overview = overviewData;
       const qs = new URLSearchParams({
         address: token.address,
         interval: chartInterval,
@@ -1215,6 +1269,7 @@ _PAGE_HTML = """<!DOCTYPE html>
         });
         if (!res.ok) return;
         const data = await res.json();
+        if (request !== detailAbort || request.signal.aborted || overview !== overviewData || token.address !== selected) return;
         const extra = data.points || [];
         if (!extra.length) return;
         chartData = {
@@ -1325,11 +1380,15 @@ _PAGE_HTML = """<!DOCTYPE html>
           if (candle) setOhlcLegend({ ...candle, time: param.time, v_usd: vol && vol.value });
         });
         tvChart.timeScale().subscribeVisibleTimeRangeChange(onVisibleRange);
+        tvChart.timeScale().subscribeVisibleLogicalRangeChange(updateWalletFirstBuyLine);
+        tvChart.timeScale().subscribeSizeChange(updateWalletFirstBuyLine);
       }
       candleSeries.setData(data.candles);
       volumeSeries.setData(data.volume);
       applyStructure(points);
       if (resetView) applyVisibleRange();
+      updateWalletFirstBuyLine();
+      requestAnimationFrame(updateWalletFirstBuyLine);
       const last = points[points.length - 1];
       if (last) setOhlcLegend(last);
     }

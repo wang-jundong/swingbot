@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import time
 from pathlib import Path
@@ -28,7 +29,7 @@ from src.config.solana import (
     RPC_REQUEST_TIMEOUT_SEC,
     SOL_ADDRESS,
 )
-from src.config.track import LOOKBACK_HOURS, TARGET_WALLET
+from src.config.track import LOOKBACK_HOURS, MAX_TOKEN_AGE_DAYS, TARGET_WALLET
 from src.dex.solana.jupiter.markets import fetch_token_metadata
 from src.utils.log_util import get_dex_logger
 from src.utils.number_util import to_float
@@ -78,6 +79,7 @@ def scan_wallet_trades(
     """Fetch Helius-parsed txs for the wallet and keep SOL buy/sell swaps.
 
     Existing mint files are kept; paging starts at the last saved trade.
+    Returned trades exclude tokens older than MAX_TOKEN_AGE_DAYS at scan time.
     """
     owner = wallet or TARGET_WALLET
     saved, saved_meta = load_wallet_scan(owner)
@@ -97,7 +99,9 @@ def scan_wallet_trades(
                 continue
             extra.append(trade)
     trades = _merge_trades(saved, extra)
-    added = sum(1 for trade in extra if _trade_key(trade) not in saved_keys)
+    meta = token_metadata(list(group_trades(trades)), trades, existing=saved_meta)
+    trades, skipped_mints, unknown_age_mints = filter_token_age(trades, meta)
+    added = sum(1 for trade in trades if _trade_key(trade) not in saved_keys)
     logger.info(
         "helius %s trades=%d added=%d txs=%d resumed=%s lookback=%s",
         owner,
@@ -110,8 +114,35 @@ def scan_wallet_trades(
     return trades, {
         "resumed": bool(saved),
         "added": added,
-        "meta": saved_meta,
+        "meta": meta,
+        "skipped_old_mints": len(skipped_mints),
+        "unknown_age_mints": len(unknown_age_mints),
     }
+
+
+
+def filter_token_age(
+    trades: list[dict],
+    meta: dict[str, dict],
+    *,
+    max_age_days: float = MAX_TOKEN_AGE_DAYS,
+    now: int | None = None,
+) -> tuple[list[dict], set[str], set[str]]:
+    """Exclude known old mints; keep unknown ages and report them separately."""
+    if not math.isfinite(max_age_days) or max_age_days < 0:
+        raise ValueError("max_age_days must be finite and non-negative")
+    if max_age_days == 0:
+        return trades, set(), set()
+    current = unix_now() if now is None else now
+    cutoff = current - max_age_days * 86400
+    skipped, unknown = set(), set()
+    for mint in {str(trade.get("mint") or "") for trade in trades}:
+        created = to_float((meta.get(mint) or {}).get("creation_time"))
+        if created is None or not math.isfinite(created) or created <= 0 or created > current:
+            unknown.add(mint)
+        elif created < cutoff:
+            skipped.add(mint)
+    return [trade for trade in trades if trade.get("mint") not in skipped], skipped, unknown
 
 
 def aggregate_trades(trades: list[dict]) -> list[dict]:

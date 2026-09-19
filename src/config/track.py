@@ -1,4 +1,6 @@
 """Default wallet and lookback for scan and OHLC export."""
 
-TARGET_WALLET = "B7XwXUuZn9zkRSV17mcn35J77hv91GJpK5jMH3Y7kk5R"
-LOOKBACK_HOURS = 720  # 0 = no time cap
+TARGET_WALLET = "CNudZYFgpbT26fidsiNrWfHeGTBMMeVWqruZXsEkcUPc"
+LOOKBACK_HOURS = 13800  # 0 = no time cap
+
+MAX_TOKEN_AGE_DAYS = 730  # Age at scan time; 0 disables the filter.

@@ -4,7 +4,7 @@ BIRDEYE_TOKEN_LIST_URL = "https://public-api.birdeye.so/defi/v3/token/list"
 BIRDEYE_PRICE_STATS_URL = "https://public-api.birdeye.so/defi/v3/price/stats/single"
 BIRDEYE_OHLCV_URL = "https://public-api.birdeye.so/defi/v3/ohlcv"
 
-OHLC_INTERVAL = "1m"
+OHLC_INTERVAL = "5m"
 OHLC_CURRENCY = "usd"
 OHLC_MAX_CANDLES = 5000
 OHLC_INTERVAL_SEC = {
